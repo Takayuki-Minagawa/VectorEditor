@@ -1,0 +1,140 @@
+import { create } from 'zustand';
+import * as fabric from 'fabric';
+import type { ToolType } from '../types';
+
+interface EditorStore {
+  // Tool
+  activeTool: ToolType;
+  setActiveTool: (tool: ToolType) => void;
+
+  // Canvas
+  canvas: fabric.Canvas | null;
+  setCanvas: (canvas: fabric.Canvas | null) => void;
+  canvasWidth: number;
+  canvasHeight: number;
+  setCanvasSize: (w: number, h: number) => void;
+  backgroundColor: string;
+  setBackgroundColor: (color: string) => void;
+
+  // Zoom
+  zoom: number;
+  setZoom: (zoom: number) => void;
+
+  // Grid
+  gridVisible: boolean;
+  toggleGrid: () => void;
+
+  // Selection tracking
+  selectedObjectIds: string[];
+  setSelectedObjectIds: (ids: string[]) => void;
+
+  // History (Undo/Redo)
+  history: string[];
+  historyIndex: number;
+  pushHistory: () => void;
+  undo: () => void;
+  redo: () => void;
+  _skipHistoryPush: boolean;
+
+  // Clipboard
+  clipboard: fabric.FabricObject[] | null;
+  setClipboard: (objects: fabric.FabricObject[] | null) => void;
+}
+
+const MAX_HISTORY = 50;
+
+export const useEditorStore = create<EditorStore>((set, get) => ({
+  activeTool: 'select',
+  setActiveTool: (tool) => {
+    const { canvas } = get();
+    if (canvas) {
+      canvas.isDrawingMode = false;
+      canvas.selection = tool === 'select';
+      canvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
+      canvas.forEachObject((obj) => {
+        obj.selectable = tool === 'select';
+        obj.evented = tool === 'select';
+      });
+      if (tool !== 'select') {
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+      }
+    }
+    set({ activeTool: tool });
+  },
+
+  canvas: null,
+  setCanvas: (canvas) => set({ canvas }),
+
+  canvasWidth: 800,
+  canvasHeight: 600,
+  setCanvasSize: (w, h) => {
+    const { canvas } = get();
+    if (canvas) {
+      canvas.setDimensions({ width: w, height: h });
+    }
+    set({ canvasWidth: w, canvasHeight: h });
+  },
+
+  backgroundColor: '#FFFFFF',
+  setBackgroundColor: (color) => {
+    const { canvas } = get();
+    if (canvas) {
+      canvas.backgroundColor = color;
+      canvas.requestRenderAll();
+    }
+    set({ backgroundColor: color });
+  },
+
+  zoom: 1,
+  setZoom: (zoom) => {
+    const { canvas } = get();
+    if (canvas) {
+      canvas.setZoom(zoom);
+      canvas.requestRenderAll();
+    }
+    set({ zoom });
+  },
+
+  gridVisible: false,
+  toggleGrid: () => set((s) => ({ gridVisible: !s.gridVisible })),
+
+  selectedObjectIds: [],
+  setSelectedObjectIds: (ids) => set({ selectedObjectIds: ids }),
+
+  history: [],
+  historyIndex: -1,
+  _skipHistoryPush: false,
+  pushHistory: () => {
+    const { canvas, history, historyIndex, _skipHistoryPush } = get();
+    if (!canvas || _skipHistoryPush) return;
+    const json = JSON.stringify(canvas.toJSON(['id', 'name', 'selectable', 'evented']));
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(json);
+    if (newHistory.length > MAX_HISTORY) newHistory.shift();
+    set({ history: newHistory, historyIndex: newHistory.length - 1 });
+  },
+  undo: () => {
+    const { canvas, history, historyIndex } = get();
+    if (!canvas || historyIndex <= 0) return;
+    const newIndex = historyIndex - 1;
+    set({ _skipHistoryPush: true, historyIndex: newIndex });
+    canvas.loadFromJSON(JSON.parse(history[newIndex])).then(() => {
+      canvas.requestRenderAll();
+      set({ _skipHistoryPush: false });
+    });
+  },
+  redo: () => {
+    const { canvas, history, historyIndex } = get();
+    if (!canvas || historyIndex >= history.length - 1) return;
+    const newIndex = historyIndex + 1;
+    set({ _skipHistoryPush: true, historyIndex: newIndex });
+    canvas.loadFromJSON(JSON.parse(history[newIndex])).then(() => {
+      canvas.requestRenderAll();
+      set({ _skipHistoryPush: false });
+    });
+  },
+
+  clipboard: null,
+  setClipboard: (objects) => set({ clipboard: objects }),
+}));
