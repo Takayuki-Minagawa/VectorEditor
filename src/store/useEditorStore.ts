@@ -1,11 +1,17 @@
 import { create } from 'zustand';
 import * as fabric from 'fabric';
-import type { ToolType } from '../types';
+import type { ToolType, DrawingMode, CadUnit } from '../types';
 
 interface EditorStore {
   // Tool
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
+
+  // Drawing mode
+  drawingMode: DrawingMode;
+  setDrawingMode: (mode: DrawingMode) => void;
+  cadUnit: CadUnit;
+  setCadUnit: (unit: CadUnit) => void;
 
   // Canvas
   canvas: fabric.Canvas | null;
@@ -32,6 +38,11 @@ interface EditorStore {
   scale: string;
   setScale: (scale: string) => void;
 
+  // CAD document size (mm, 1:1 mode)
+  cadWidth: number;
+  cadHeight: number;
+  setCadSize: (w: number, h: number) => void;
+
   // Selection tracking
   selectedObjectIds: string[];
   setSelectedObjectIds: (ids: string[]) => void;
@@ -52,6 +63,11 @@ interface EditorStore {
 const MAX_HISTORY = 50;
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
+  drawingMode: 'illustration',
+  setDrawingMode: (mode) => set({ drawingMode: mode }),
+  cadUnit: 'mm',
+  setCadUnit: (unit) => set({ cadUnit: unit }),
+
   activeTool: 'select',
   setActiveTool: (tool) => {
     const { canvas } = get();
@@ -95,14 +111,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   zoom: 1,
-  setZoom: (zoom) => {
-    const { canvas } = get();
-    if (canvas) {
-      canvas.setZoom(zoom);
-      canvas.requestRenderAll();
-    }
-    set({ zoom });
-  },
+  setZoom: (zoom) => set({ zoom }),
 
   gridVisible: false,
   toggleGrid: () => set((s) => ({ gridVisible: !s.gridVisible })),
@@ -113,6 +122,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   scale: '1:1',
   setScale: (scale) => set({ scale }),
+
+  cadWidth: 10000,   // 10m default
+  cadHeight: 8000,   // 8m default
+  setCadSize: (w, h) => set({ cadWidth: w, cadHeight: h }),
 
   selectedObjectIds: [],
   setSelectedObjectIds: (ids) => set({ selectedObjectIds: ids }),

@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
+import { mmToUnit, unitToMm, formatReal } from '../types';
 import type { ToolType } from '../types';
 import LatexDialog from './LatexDialog';
 
@@ -21,6 +22,68 @@ function snapVal(v: number, gridSize: number): number {
   return Math.round(v / gridSize) * gridSize;
 }
 
+function StretchDialog({
+  stretchDx, stretchDy, setStretchDx, setStretchDy, onApply, onCancel,
+}: {
+  stretchDx: number; stretchDy: number;
+  setStretchDx: (v: number) => void; setStretchDy: (v: number) => void;
+  onApply: () => void; onCancel: () => void;
+}) {
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const cadUnit = useEditorStore((s) => s.cadUnit);
+  const t = useI18n((s) => s.t);
+  const isCad = drawingMode === 'cad';
+  const unit = isCad ? cadUnit : 'px';
+  const step = isCad ? (cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001) : 1;
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-content nm-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <span>{t('stretchTitle')}</span>
+          <button className="modal-close" onClick={onCancel}>&times;</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{t('stretchDesc')}</p>
+          <div className="nm-row">
+            <label>{t('stretchOffsetX')} ({unit})</label>
+            <input type="number" value={stretchDx} onChange={(e) => setStretchDx(Number(e.target.value))} step={step} autoFocus />
+          </div>
+          <div className="nm-row">
+            <label>{t('stretchOffsetY')} ({unit})</label>
+            <input type="number" value={stretchDy} onChange={(e) => setStretchDy(Number(e.target.value))} step={step} />
+          </div>
+        </div>
+        <div className="nm-actions">
+          <button className="toolbar-btn nm-btn" onClick={onApply}>{t('stretchApply')}</button>
+          <button className="toolbar-btn nm-btn nm-cancel" onClick={onCancel}>{t('cancel')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MeasureBody({ result }: { result: MeasureResult }) {
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const cadUnit = useEditorStore((s) => s.cadUnit);
+  const t = useI18n((s) => s.t);
+  const isCad = drawingMode === 'cad';
+
+  const fmt = (val: number) =>
+    isCad
+      ? `${formatReal(mmToUnit(val, cadUnit), cadUnit)} ${cadUnit}`
+      : `${val} px`;
+
+  return (
+    <div className="measure-popup-body">
+      <div className="measure-row"><span className="measure-label">{t('measureX')}</span><span className="measure-val">{fmt(result.x)}</span></div>
+      <div className="measure-row"><span className="measure-label">{t('measureY')}</span><span className="measure-val">{fmt(result.y)}</span></div>
+      <div className="measure-row"><span className="measure-label">{t('measureWidth')}</span><span className="measure-val">{fmt(result.width)}</span></div>
+      <div className="measure-row"><span className="measure-label">{t('measureHeight')}</span><span className="measure-val">{fmt(result.height)}</span></div>
+    </div>
+  );
+}
+
 export default function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -30,6 +93,13 @@ export default function Canvas() {
   const currentShape = useRef<fabric.FabricObject | null>(null);
   const polygonPoints = useRef<{ x: number; y: number }[]>([]);
   const polygonLines = useRef<fabric.Line[]>([]);
+
+  // CAD viewport refs
+  const isPanning = useRef(false);
+  const lastPanPoint = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const spacePressed = useRef(false);
+  const zoomFromWheel = useRef(false);
+  const cadInitDone = useRef(false);
 
   const {
     setCanvas,
@@ -46,11 +116,20 @@ export default function Canvas() {
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
   const gridSize = useEditorStore((s) => s.gridSize);
   const snapToGrid = useEditorStore((s) => s.snapToGrid);
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const cadWidth = useEditorStore((s) => s.cadWidth);
+  const cadHeight = useEditorStore((s) => s.cadHeight);
   const t = useI18n((s) => s.t);
   const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
   const [measureCopied, setMeasureCopied] = useState(false);
   const measureShape = useRef<fabric.Rect | null>(null);
   const [latexPlacement, setLatexPlacement] = useState<{ x: number; y: number } | null>(null);
+
+  // Stretch tool state
+  const stretchPreview = useRef<fabric.Rect | null>(null);
+  const [stretchBox, setStretchBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [stretchDx, setStretchDx] = useState(0);
+  const [stretchDy, setStretchDy] = useState(0);
 
   const snap = useCallback(
     (v: number) => (snapToGrid ? snapVal(v, gridSize) : v),
@@ -221,7 +300,10 @@ export default function Canvas() {
           // Label
           const midX = (startX + endX) / 2;
           const midY = (startY + endY) / 2;
-          const labelText = Math.round(dist).toString();
+          const { drawingMode: dm, cadUnit: cu } = useEditorStore.getState();
+          const labelText = dm === 'cad'
+            ? `${formatReal(mmToUnit(dist, cu), cu)} ${cu}`
+            : Math.round(dist).toString();
           const label = new fabric.Text(labelText, {
             left: midX,
             top: midY - 14,
@@ -371,12 +453,29 @@ export default function Canvas() {
     if (!canvas) return;
 
     const handleMouseDown = (opt: fabric.TPointerEventInfo) => {
+      // CAD pan: Space+left click or middle mouse button
+      const currentMode = useEditorStore.getState().drawingMode;
+      if (currentMode === 'cad' && (spacePressed.current || (opt.e as MouseEvent).button === 1)) {
+        isPanning.current = true;
+        lastPanPoint.current = { x: (opt.e as MouseEvent).clientX, y: (opt.e as MouseEvent).clientY };
+        canvas.defaultCursor = 'grabbing';
+        return;
+      }
+
       if (activeTool === 'select') return;
       const rawPointer = canvas.getScenePoint(opt.e);
       const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
 
       // Measure tool: start drawing a temporary rectangle
       if (activeTool === 'measure') {
+        isDrawing.current = true;
+        drawStart.current = { x: pointer.x, y: pointer.y };
+        canvas.selection = false;
+        return;
+      }
+
+      // Stretch tool: start drawing crossing window
+      if (activeTool === 'stretch') {
         isDrawing.current = true;
         drawStart.current = { x: pointer.x, y: pointer.y };
         canvas.selection = false;
@@ -449,6 +548,18 @@ export default function Canvas() {
     };
 
     const handleMouseMove = (opt: fabric.TPointerEventInfo) => {
+      // CAD panning
+      if (isPanning.current) {
+        const vpt = canvas.viewportTransform;
+        if (vpt) {
+          vpt[4] += (opt.e as MouseEvent).clientX - lastPanPoint.current.x;
+          vpt[5] += (opt.e as MouseEvent).clientY - lastPanPoint.current.y;
+          lastPanPoint.current = { x: (opt.e as MouseEvent).clientX, y: (opt.e as MouseEvent).clientY };
+          canvas.setViewportTransform(vpt);
+        }
+        return;
+      }
+
       if (!isDrawing.current || activeTool === 'select') return;
       const rawPointer = canvas.getScenePoint(opt.e);
       const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
@@ -477,6 +588,30 @@ export default function Canvas() {
         return;
       }
 
+      // Stretch tool preview
+      if (activeTool === 'stretch') {
+        if (stretchPreview.current) {
+          canvas.remove(stretchPreview.current);
+        }
+        const left = Math.min(drawStart.current.x, pointer.x);
+        const top = Math.min(drawStart.current.y, pointer.y);
+        const w = Math.abs(pointer.x - drawStart.current.x);
+        const h = Math.abs(pointer.y - drawStart.current.y);
+        const rect = new fabric.Rect({
+          left, top, width: w, height: h,
+          fill: 'rgba(255,152,0,0.15)',
+          stroke: '#ff9800',
+          strokeWidth: 1,
+          strokeDashArray: [4, 4],
+          selectable: false,
+          evented: false,
+        });
+        canvas.add(rect);
+        stretchPreview.current = rect;
+        canvas.requestRenderAll();
+        return;
+      }
+
       // Remove previous preview
       if (currentShape.current) {
         canvas.remove(currentShape.current);
@@ -500,10 +635,38 @@ export default function Canvas() {
     };
 
     const handleMouseUp = (opt: fabric.TPointerEventInfo) => {
+      // CAD pan end
+      if (isPanning.current) {
+        isPanning.current = false;
+        const tool = useEditorStore.getState().activeTool;
+        canvas.defaultCursor = spacePressed.current ? 'grab' : (tool === 'select' ? 'default' : 'crosshair');
+        return;
+      }
+
       if (!isDrawing.current || activeTool === 'select') return;
       isDrawing.current = false;
       const rawPointer = canvas.getScenePoint(opt.e);
       const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
+
+      // Stretch tool: save box and show dialog
+      if (activeTool === 'stretch') {
+        if (stretchPreview.current) {
+          canvas.remove(stretchPreview.current);
+          stretchPreview.current = null;
+        }
+        const left = Math.min(drawStart.current.x, pointer.x);
+        const top = Math.min(drawStart.current.y, pointer.y);
+        const w = Math.abs(pointer.x - drawStart.current.x);
+        const h = Math.abs(pointer.y - drawStart.current.y);
+        if (w >= 2 || h >= 2) {
+          setStretchBox({ left, top, width: w, height: h });
+          setStretchDx(0);
+          setStretchDy(0);
+        }
+        canvas.selection = true;
+        canvas.requestRenderAll();
+        return;
+      }
 
       // Measure tool: calculate LaTeX coordinates and show popup
       if (activeTool === 'measure') {
@@ -600,21 +763,212 @@ export default function Canvas() {
     };
   }, [activeTool, applyDefaults, createShapeOnDrag, finishDrawing, setActiveTool, pushHistory, t, snap, gridSize]);
 
-  // Zoom handling
+  // Combined mode switch + zoom handling
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    canvas.setZoom(zoom);
-    canvas.setDimensions({
-      width: canvasWidth * zoom,
-      height: canvasHeight * zoom,
-    });
-    canvas.requestRenderAll();
-  }, [zoom, canvasWidth, canvasHeight]);
 
-  // Draw grid overlay
+    if (drawingMode === 'cad') {
+      if (!cadInitDone.current) {
+        // First time in CAD mode: set up viewport
+        cadInitDone.current = true;
+        const wrapper = wrapperRef.current;
+        if (wrapper) {
+          const rect = wrapper.getBoundingClientRect();
+          const w = rect.width || 800;
+          const h = rect.height || 600;
+          canvas.setDimensions({ width: w, height: h });
+          canvas.backgroundColor = '#f5f5f5';
+
+          const fitZoom = Math.min(w / cadWidth, h / cadHeight) * 0.9;
+          const panX = (w - cadWidth * fitZoom) / 2;
+          const panY = (h - cadHeight * fitZoom) / 2;
+          canvas.setViewportTransform([fitZoom, 0, 0, fitZoom, panX, panY]);
+
+          zoomFromWheel.current = true;
+          useEditorStore.setState({ zoom: fitZoom });
+        }
+      } else if (!zoomFromWheel.current) {
+        // Zoom from StatusBar — zoom toward canvas center
+        const center = new fabric.Point(canvas.width! / 2, canvas.height! / 2);
+        canvas.zoomToPoint(center, zoom);
+      }
+      zoomFromWheel.current = false;
+    } else {
+      if (cadInitDone.current) {
+        // Leaving CAD mode: restore
+        cadInitDone.current = false;
+        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        canvas.backgroundColor = useEditorStore.getState().backgroundColor;
+      }
+      canvas.setZoom(zoom);
+      canvas.setDimensions({
+        width: canvasWidth * zoom,
+        height: canvasHeight * zoom,
+      });
+    }
+    canvas.requestRenderAll();
+  }, [zoom, canvasWidth, canvasHeight, drawingMode, cadWidth, cadHeight]);
+
+  // CAD mode: ResizeObserver to keep canvas filling wrapper
+  useEffect(() => {
+    if (drawingMode !== 'cad') return;
+    const canvas = fabricRef.current;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) {
+        canvas.setDimensions({ width, height });
+        canvas.requestRenderAll();
+      }
+    });
+
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [drawingMode]);
+
+  // CAD mode: mouse wheel zoom
+  useEffect(() => {
+    if (drawingMode !== 'cad') return;
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+
+    const handleWheel = (opt: fabric.TPointerEventInfo<WheelEvent>) => {
+      const e = opt.e;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const delta = e.deltaY;
+      let newZoom = canvas.getZoom() * (1 - delta / 300);
+      newZoom = Math.max(0.001, Math.min(100, newZoom));
+
+      const point = canvas.getScenePoint(e);
+      canvas.zoomToPoint(new fabric.Point(point.x, point.y), newZoom);
+
+      zoomFromWheel.current = true;
+      useEditorStore.setState({ zoom: newZoom });
+      canvas.requestRenderAll();
+    };
+
+    canvas.on('mouse:wheel', handleWheel);
+    return () => { canvas.off('mouse:wheel', handleWheel); };
+  }, [drawingMode]);
+
+  // CAD mode: Space key for panning cursor
+  useEffect(() => {
+    if (drawingMode !== 'cad') {
+      spacePressed.current = false;
+      return;
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault();
+        spacePressed.current = true;
+        const canvas = fabricRef.current;
+        if (canvas) canvas.defaultCursor = 'grab';
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spacePressed.current = false;
+        const canvas = fabricRef.current;
+        const tool = useEditorStore.getState().activeTool;
+        if (canvas) canvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      spacePressed.current = false;
+    };
+  }, [drawingMode]);
+
+  // CAD mode: render grid and document bounds via after:render
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    if (drawingMode !== 'cad') {
+      canvas.requestRenderAll();
+      return;
+    }
+
+    const handler = () => {
+      const ctx = canvas.getContext();
+      const vpt = canvas.viewportTransform;
+      if (!vpt) return;
+
+      const z = canvas.getZoom();
+      const panX = vpt[4];
+      const panY = vpt[5];
+      const w = canvas.width || 0;
+      const h = canvas.height || 0;
+      const cw = useEditorStore.getState().cadWidth;
+      const ch = useEditorStore.getState().cadHeight;
+
+      // Draw document bounds (dashed border only, no fill to avoid covering objects)
+      const dx0 = panX;
+      const dy0 = panY;
+      const dw = cw * z;
+      const dh = ch * z;
+      ctx.save();
+      ctx.strokeStyle = '#bbb';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(dx0, dy0, dw, dh);
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Draw grid
+      if (gridVisible && gridSize > 0) {
+        const left = -panX / z;
+        const top = -panY / z;
+        const right = left + w / z;
+        const bottom = top + h / z;
+
+        const step = gridSize;
+        const startX = Math.floor(left / step) * step;
+        const startY = Math.floor(top / step) * step;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(200,200,200,0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+
+        for (let x = startX; x <= right; x += step) {
+          const sx = x * z + panX;
+          ctx.moveTo(sx, 0);
+          ctx.lineTo(sx, h);
+        }
+        for (let y = startY; y <= bottom; y += step) {
+          const sy = y * z + panY;
+          ctx.moveTo(0, sy);
+          ctx.lineTo(w, sy);
+        }
+
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+
+    canvas.on('after:render', handler);
+    canvas.requestRenderAll();
+    return () => {
+      canvas.off('after:render', handler);
+      canvas.requestRenderAll();
+    };
+  }, [drawingMode, gridVisible, gridSize]);
+
+  // Draw grid overlay (illustration mode only)
   const renderGrid = () => {
-    if (!gridVisible) return null;
+    if (!gridVisible || drawingMode === 'cad') return null;
     const step = gridSize;
     const lines: React.ReactElement[] = [];
     for (let x = 0; x <= canvasWidth; x += step) {
@@ -686,6 +1040,113 @@ export default function Canvas() {
     setActiveTool('select');
   }, [setActiveTool]);
 
+  const handleStretchApply = () => {
+    const canvas = fabricRef.current;
+    if (!canvas || !stretchBox) return;
+
+    const { drawingMode: dm, cadUnit: cu } = useEditorStore.getState();
+    const isCad = dm === 'cad';
+
+    const dx = isCad ? unitToMm(stretchDx, cu) : stretchDx;
+    const dy = isCad ? unitToMm(stretchDy, cu) : stretchDy;
+
+    if (dx === 0 && dy === 0) {
+      setStretchBox(null);
+      setActiveTool('select');
+      return;
+    }
+
+    const box = stretchBox;
+    const boxRight = box.left + box.width;
+    const boxBottom = box.top + box.height;
+
+    const pointIn = (px: number, py: number) =>
+      px >= box.left && px <= boxRight && py >= box.top && py <= boxBottom;
+
+    canvas.getObjects().forEach((obj) => {
+      const bounds = obj.getBoundingRect();
+      const objRight = bounds.left + bounds.width;
+      const objBottom = bounds.top + bounds.height;
+
+      const tlIn = pointIn(bounds.left, bounds.top);
+      const trIn = pointIn(objRight, bounds.top);
+      const blIn = pointIn(bounds.left, objBottom);
+      const brIn = pointIn(objRight, objBottom);
+
+      const count = [tlIn, trIn, blIn, brIn].filter(Boolean).length;
+
+      if (count === 0) return;
+
+      if (count === 4) {
+        obj.set({ left: (obj.left || 0) + dx, top: (obj.top || 0) + dy });
+        obj.setCoords();
+        return;
+      }
+
+      // Partially inside — stretch logic
+      if (obj instanceof fabric.Rect && (obj.angle || 0) === 0) {
+        const leftSideIn = tlIn || blIn;
+        const rightSideIn = trIn || brIn;
+        const topSideIn = tlIn || trIn;
+        const bottomSideIn = blIn || brIn;
+
+        // X direction
+        if (dx !== 0) {
+          if (leftSideIn && rightSideIn) {
+            obj.set({ left: (obj.left || 0) + dx });
+          } else if (rightSideIn) {
+            const dw = (obj.width || 1) * (obj.scaleX || 1);
+            const newDw = dw + dx;
+            if (newDw > 1) obj.set({ scaleX: newDw / (obj.width || 1) });
+          } else if (leftSideIn) {
+            const dw = (obj.width || 1) * (obj.scaleX || 1);
+            const newDw = dw - dx;
+            if (newDw > 1) {
+              obj.set({ left: (obj.left || 0) + dx, scaleX: newDw / (obj.width || 1) });
+            }
+          }
+        }
+
+        // Y direction
+        if (dy !== 0) {
+          if (topSideIn && bottomSideIn) {
+            obj.set({ top: (obj.top || 0) + dy });
+          } else if (bottomSideIn) {
+            const dh = (obj.height || 1) * (obj.scaleY || 1);
+            const newDh = dh + dy;
+            if (newDh > 1) obj.set({ scaleY: newDh / (obj.height || 1) });
+          } else if (topSideIn) {
+            const dh = (obj.height || 1) * (obj.scaleY || 1);
+            const newDh = dh - dy;
+            if (newDh > 1) {
+              obj.set({ top: (obj.top || 0) + dy, scaleY: newDh / (obj.height || 1) });
+            }
+          }
+        }
+
+        obj.setCoords();
+      } else {
+        // For non-Rect objects: move if center is inside the box
+        const cx = bounds.left + bounds.width / 2;
+        const cy = bounds.top + bounds.height / 2;
+        if (pointIn(cx, cy)) {
+          obj.set({ left: (obj.left || 0) + dx, top: (obj.top || 0) + dy });
+          obj.setCoords();
+        }
+      }
+    });
+
+    canvas.requestRenderAll();
+    pushHistory();
+    setStretchBox(null);
+    setActiveTool('select');
+  };
+
+  const handleStretchCancel = () => {
+    setStretchBox(null);
+    setActiveTool('select');
+  };
+
   const handleCopyMeasure = () => {
     if (!measureResult) return;
     const text = `x=${measureResult.x}, y=${measureResult.y}, width=${measureResult.width}, height=${measureResult.height}`;
@@ -695,11 +1156,17 @@ export default function Canvas() {
     });
   };
 
+  const isCadMode = drawingMode === 'cad';
+
   return (
-    <div className="canvas-wrapper" ref={wrapperRef}>
+    <div className={`canvas-wrapper ${isCadMode ? 'cad-mode' : ''}`} ref={wrapperRef}>
       <div
         className="canvas-container"
-        style={{
+        style={isCadMode ? {
+          width: '100%',
+          height: '100%',
+          position: 'relative',
+        } : {
           width: canvasWidth * zoom,
           height: canvasHeight * zoom,
           position: 'relative',
@@ -716,16 +1183,22 @@ export default function Canvas() {
         />
       )}
 
+      {stretchBox && (
+        <StretchDialog
+          stretchDx={stretchDx}
+          stretchDy={stretchDy}
+          setStretchDx={setStretchDx}
+          setStretchDy={setStretchDy}
+          onApply={handleStretchApply}
+          onCancel={handleStretchCancel}
+        />
+      )}
+
       {measureResult && (
         <div className="modal-overlay" onClick={() => setMeasureResult(null)}>
           <div className="measure-popup" onClick={(e) => e.stopPropagation()}>
             <div className="measure-popup-title">{t('measureResult')}</div>
-            <div className="measure-popup-body">
-              <div className="measure-row"><span className="measure-label">{t('measureX')}</span><span className="measure-val">{measureResult.x} px</span></div>
-              <div className="measure-row"><span className="measure-label">{t('measureY')}</span><span className="measure-val">{measureResult.y} px</span></div>
-              <div className="measure-row"><span className="measure-label">{t('measureWidth')}</span><span className="measure-val">{measureResult.width} px</span></div>
-              <div className="measure-row"><span className="measure-label">{t('measureHeight')}</span><span className="measure-val">{measureResult.height} px</span></div>
-            </div>
+            <MeasureBody result={measureResult} />
             <div className="measure-popup-actions">
               <button className="toolbar-btn" onClick={handleCopyMeasure}>
                 {measureCopied ? t('measureCopied') : t('measureCopy')}

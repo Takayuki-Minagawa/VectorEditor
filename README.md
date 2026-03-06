@@ -13,6 +13,15 @@ A browser-based vector illustration editor for creating diagrams and illustratio
 - **LaTeX Math** &mdash; Place LaTeX math expressions on the canvas with live preview (powered by KaTeX)
 - **LaTeX Position Measure** &mdash; Draw a rectangle to display position and size in LaTeX coordinates (bottom-left origin)
 
+### CAD Mode (1:1 Real-Scale)
+- **1:1 mm Coordinates** &mdash; Internal coordinates are real-world mm values; draw at actual scale
+- **Viewport Pan & Zoom** &mdash; Space+drag or middle-button drag to pan; mouse wheel to zoom toward cursor
+- **Drawing Size** &mdash; Configurable document bounds in mm (default 10m &times; 8m)
+- **Unit Display** &mdash; Switch between mm, cm, and m for property display
+- **CAD Export** &mdash; Specify paper size (A0&ndash;A4) and scale (1:1 to 1:500); export as SVG, PNG, or PDF with automatic coordinate conversion
+- **Numeric Move / Copy** &mdash; Move or copy selected objects by exact mm offset
+- **Stretch** &mdash; Draw a crossing window and stretch objects by numeric value
+
 ### Editing & Layout
 - **Object Editing** &mdash; Select, move, resize (8-direction handles), rotate, copy, paste, duplicate, and delete
 - **Alignment & Distribution** &mdash; Left / center / right / top / middle / bottom alignment, horizontal and vertical even distribution
@@ -24,8 +33,8 @@ A browser-based vector illustration editor for creating diagrams and illustratio
 - **Canvas Presets** &mdash; A4/A3, US Letter, slides (16:9/4:3), OGP, Instagram, YouTube thumbnail, and more
 
 ### File & Export
-- **Save & Load** &mdash; JSON-based project files for full re-editing; auto-save to localStorage
-- **Export** &mdash; SVG (vector), PNG (2x resolution), and PDF (vector-quality) export
+- **Save & Load** &mdash; JSON-based project files for full re-editing; auto-save to localStorage with CAD metadata
+- **Export** &mdash; SVG (vector), PNG (2x resolution), and PDF (vector-quality) export; CAD mode uses paper+scale export dialog
 - **Undo / Redo** &mdash; Up to 50 history steps
 
 ### UI & Accessibility
@@ -96,6 +105,8 @@ src/
     ShortcutHelp.tsx    # Keyboard shortcut reference dialog
     HelpManual.tsx      # In-app user guide dialog
     LatexDialog.tsx     # LaTeX math input dialog with live preview
+    NumericMoveDialog.tsx # Numeric move/copy dialog
+    CadExportDialog.tsx  # CAD paper+scale export dialog
   store/
     useEditorStore.ts   # Zustand store (canvas, history, selection, clipboard, grid, snap, scale)
   hooks/
@@ -111,6 +122,16 @@ src/
 ```
 
 ## Changelog
+
+### v1.0.2
+- **CAD 1:1 viewport system** &mdash; Internal coordinates in real-world mm; viewport-based pan (Space+drag) and zoom (mouse wheel)
+- **CAD export dialog** &mdash; Paper size (A0&ndash;A4), scale (1:1&ndash;1:500), and format (SVG/PNG/PDF) selection
+- **Numeric move/copy** &mdash; Move or duplicate selected objects by exact offset
+- **Stretch tool** &mdash; Select a crossing window and stretch objects by numeric value
+- **Drawing mode toggle** &mdash; Switch between Illustration (pixel) and CAD (mm) modes via status bar
+- **Unit display** &mdash; mm/cm/m unit switching for CAD mode
+- **Fit-to-view** button for CAD mode
+- Auto-save/load preserves CAD settings (drawing size, mode, unit)
 
 ### v1.0.1
 - Architecture tools: dimension line, wall, column

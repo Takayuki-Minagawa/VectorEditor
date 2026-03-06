@@ -15,7 +15,8 @@ export type ToolType =
   | 'dimension'
   | 'wall'
   | 'column'
-  | 'latex';
+  | 'latex'
+  | 'stretch';
 
 export interface CanvasPreset {
   labelKey: string;
@@ -48,6 +49,86 @@ export const CANVAS_PRESETS: CanvasPreset[] = [
   { labelKey: 'preset_custom', width: 0, height: 0, category: 'custom' },
 ];
 
+export type DrawingMode = 'illustration' | 'cad';
+export type CadUnit = 'mm' | 'cm' | 'm';
+
+// 72 DPI: 1 inch = 72px, 1mm = 72/25.4 px
+export const PX_PER_MM = 72 / 25.4;
+
+/** Parse scale string like "1:100" to ratio number (100) */
+export function parseScaleRatio(scale: string): number {
+  const parts = scale.split(':');
+  if (parts.length === 2) {
+    const n = Number(parts[0]);
+    const d = Number(parts[1]);
+    if (n > 0 && d > 0) return d / n;
+  }
+  return 1;
+}
+
+/** Convert pixel value to real-world value in the given unit */
+export function pxToReal(px: number, scaleRatio: number, unit: CadUnit): number {
+  const mm = (px / PX_PER_MM) * scaleRatio;
+  switch (unit) {
+    case 'mm': return mm;
+    case 'cm': return mm / 10;
+    case 'm': return mm / 1000;
+  }
+}
+
+/** Convert real-world value to pixel value */
+export function realToPx(real: number, scaleRatio: number, unit: CadUnit): number {
+  let mm: number;
+  switch (unit) {
+    case 'mm': mm = real; break;
+    case 'cm': mm = real * 10; break;
+    case 'm': mm = real * 1000; break;
+  }
+  return (mm * PX_PER_MM) / scaleRatio;
+}
+
+/** Format a real-world value for display (round to reasonable precision) */
+export function formatReal(value: number, unit: CadUnit): string {
+  switch (unit) {
+    case 'mm': return Math.round(value).toString();
+    case 'cm': return value.toFixed(1);
+    case 'm': return value.toFixed(3);
+  }
+}
+
+/** Convert mm value to display unit */
+export function mmToUnit(mm: number, unit: CadUnit): number {
+  switch (unit) {
+    case 'mm': return mm;
+    case 'cm': return mm / 10;
+    case 'm': return mm / 1000;
+  }
+}
+
+/** Convert display unit value back to mm */
+export function unitToMm(value: number, unit: CadUnit): number {
+  switch (unit) {
+    case 'mm': return value;
+    case 'cm': return value * 10;
+    case 'm': return value * 1000;
+  }
+}
+
+/** Paper size definition in mm */
+export interface PaperSize {
+  label: string;
+  width: number;  // mm
+  height: number; // mm
+}
+
+export const PAPER_SIZES: PaperSize[] = [
+  { label: 'A0', width: 841, height: 1189 },
+  { label: 'A1', width: 594, height: 841 },
+  { label: 'A2', width: 420, height: 594 },
+  { label: 'A3', width: 297, height: 420 },
+  { label: 'A4', width: 210, height: 297 },
+];
+
 export interface DocumentData {
   documentId: string;
   canvas: {
@@ -57,4 +138,10 @@ export interface DocumentData {
   };
   objects: string; // Fabric.js JSON string
   version: number;
+  // CAD mode metadata (for external program interop)
+  drawingMode?: DrawingMode;
+  cadUnit?: CadUnit;
+  scale?: string;
+  cadWidth?: number;   // CAD drawing width in mm (1:1 mode)
+  cadHeight?: number;  // CAD drawing height in mm (1:1 mode)
 }

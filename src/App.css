@@ -225,9 +225,20 @@
   position: relative;
 }
 
+.canvas-wrapper.cad-mode {
+  overflow: hidden;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
 .canvas-container {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
   background: #fff;
+}
+
+.cad-mode .canvas-container {
+  box-shadow: none;
+  background: transparent;
 }
 
 .canvas-container canvas {
@@ -825,6 +836,47 @@
   font-weight: 600;
 }
 
+/* ===== Drawing Mode Toggle ===== */
+.status-mode-btn {
+  padding: 2px 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 10px;
+  color: #555;
+  height: 22px;
+  transition: background 0.15s;
+  margin-right: 1px;
+}
+
+.status-mode-btn:first-of-type {
+  border-radius: 3px 0 0 3px;
+  margin-right: 0;
+  border-right: none;
+}
+
+.status-mode-btn:nth-of-type(2) {
+  border-radius: 0 3px 3px 0;
+}
+
+.status-mode-btn:hover {
+  background: #e8e8e8;
+}
+
+.status-mode-btn.active {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.status-real-label {
+  font-size: 10px;
+  color: #888;
+  margin-left: 2px;
+}
+
 /* ===== LaTeX Dialog ===== */
 .latex-dialog {
   width: 480px;
@@ -917,6 +969,59 @@
   padding: 8px 16px;
   border-top: 1px solid #e8e8e8;
   background: #f8f9fa;
+}
+
+/* ===== Numeric Move / Stretch Dialog ===== */
+.nm-dialog {
+  width: 340px;
+}
+
+.nm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.nm-row label {
+  width: 100px;
+  min-width: 100px;
+  font-size: 12px;
+  color: #555;
+}
+
+.nm-row input[type='number'] {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.nm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid #e8e8e8;
+  background: #f8f9fa;
+}
+
+.nm-btn {
+  padding: 5px 14px !important;
+  font-size: 12px !important;
+  border: 1px solid #ccc !important;
+  border-radius: 4px !important;
+  cursor: pointer;
+}
+
+.nm-btn:hover {
+  background: #e0e7ff !important;
+  border-color: #93c5fd !important;
+}
+
+.nm-cancel {
+  color: #888 !important;
 }
 
 /* ===== Fabric.js overrides ===== */
