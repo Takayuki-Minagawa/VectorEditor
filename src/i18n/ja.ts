@@ -17,6 +17,7 @@ const ja = {
   tool_polyline: 'ポリライン',
   tool_text: '文字',
   tool_measure: 'LaTeX計測',
+  tool_latex: 'LaTeX数式',
   tool_dimension: '寸法線',
   tool_wall: '壁',
   tool_column: '柱',
@@ -228,6 +229,13 @@ const ja = {
   layerDimension: '寸法線',
   layerWall: '壁',
   layerColumn: '柱',
+  layerLatex: 'LaTeX数式',
+
+  // LaTeX dialog
+  latexInput: 'LaTeX数式入力',
+  latexFormula: '数式',
+  latexPlace: '配置',
+  latexPreview: 'プレビュー',
 
   // Measure tool
   measureResult: 'LaTeX座標',

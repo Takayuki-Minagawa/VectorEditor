@@ -825,6 +825,46 @@
   font-weight: 600;
 }
 
+/* ===== LaTeX Dialog ===== */
+.latex-dialog {
+  width: 480px;
+}
+
+.latex-textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 14px;
+  resize: vertical;
+  margin-bottom: 8px;
+  box-sizing: border-box;
+}
+
+.latex-preview-label {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.latex-preview-area {
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 12px 16px;
+  min-height: 48px;
+  background: #fafafa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  margin-bottom: 8px;
+}
+
+.latex-render {
+  display: inline-block;
+}
+
 /* ===== Measure Popup ===== */
 .measure-popup {
   background: #fff;

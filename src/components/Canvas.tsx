@@ -3,6 +3,7 @@ import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import type { ToolType } from '../types';
+import LatexDialog from './LatexDialog';
 
 interface MeasureResult {
   x: number;
@@ -49,6 +50,7 @@ export default function Canvas() {
   const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
   const [measureCopied, setMeasureCopied] = useState(false);
   const measureShape = useRef<fabric.Rect | null>(null);
+  const [latexPlacement, setLatexPlacement] = useState<{ x: number; y: number } | null>(null);
 
   const snap = useCallback(
     (v: number) => (snapToGrid ? snapVal(v, gridSize) : v),
@@ -381,6 +383,12 @@ export default function Canvas() {
         return;
       }
 
+      // LaTeX tool: click to open dialog
+      if (activeTool === 'latex') {
+        setLatexPlacement({ x: pointer.x, y: pointer.y });
+        return;
+      }
+
       // Column tool: click to place
       if (activeTool === 'column') {
         const sz = gridSize > 0 ? gridSize : 20;
@@ -651,6 +659,33 @@ export default function Canvas() {
     );
   };
 
+  const handleLatexPlace = useCallback(
+    (dataUrl: string) => {
+      const canvas = fabricRef.current;
+      if (!canvas || !latexPlacement) return;
+
+      fabric.Image.fromURL(dataUrl).then((img) => {
+        img.set({
+          left: latexPlacement.x,
+          top: latexPlacement.y,
+          scaleX: 1 / 3,
+          scaleY: 1 / 3,
+        });
+        const id = generateId('latex');
+        applyDefaults(img, id);
+        canvas.add(img);
+        finishDrawing(img);
+        setLatexPlacement(null);
+      });
+    },
+    [latexPlacement, applyDefaults, finishDrawing],
+  );
+
+  const handleLatexCancel = useCallback(() => {
+    setLatexPlacement(null);
+    setActiveTool('select');
+  }, [setActiveTool]);
+
   const handleCopyMeasure = () => {
     if (!measureResult) return;
     const text = `x=${measureResult.x}, y=${measureResult.y}, width=${measureResult.width}, height=${measureResult.height}`;
@@ -673,6 +708,13 @@ export default function Canvas() {
         <canvas ref={canvasRef} />
         {renderGrid()}
       </div>
+
+      {latexPlacement && (
+        <LatexDialog
+          onPlace={handleLatexPlace}
+          onCancel={handleLatexCancel}
+        />
+      )}
 
       {measureResult && (
         <div className="modal-overlay" onClick={() => setMeasureResult(null)}>

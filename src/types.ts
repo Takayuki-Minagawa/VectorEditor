@@ -14,7 +14,8 @@ export type ToolType =
   | 'measure'
   | 'dimension'
   | 'wall'
-  | 'column';
+  | 'column'
+  | 'latex';
 
 export interface CanvasPreset {
   labelKey: string;

@@ -29,6 +29,7 @@ const allTools: ToolDef[] = [
   { tool: 'dimension', labelKey: 'tool_dimension', icon: '↔', category: 'arch' },
   { tool: 'wall', labelKey: 'tool_wall', icon: '▬', category: 'arch' },
   { tool: 'column', labelKey: 'tool_column', icon: '▪', category: 'arch' },
+  { tool: 'latex', labelKey: 'tool_latex', icon: '∑', category: 'utility' },
   { tool: 'measure', labelKey: 'tool_measure', icon: '📐', category: 'utility' },
 ];
 

@@ -13,6 +13,7 @@
   "dependencies": {
     "fabric": "^7.2.0",
     "jspdf": "^4.2.0",
+    "katex": "^0.16.35",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "svg2pdf.js": "^2.7.0",

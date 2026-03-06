@@ -21,8 +21,11 @@ export default function LayerPanel() {
     const objects = canvas.getObjects();
     const items: LayerItem[] = objects.map((obj, i) => {
       const typed = obj as fabric.FabricObject & { id?: string };
+      const objId = typed.id || '';
       let label = obj.type || 'object';
-      if (obj instanceof fabric.Textbox || obj instanceof fabric.IText) {
+      if (objId.startsWith('latex_')) {
+        label = t('layerLatex');
+      } else if (obj instanceof fabric.Textbox || obj instanceof fabric.IText) {
         const text = (obj as fabric.Textbox).text || '';
         label = `T: ${text.slice(0, 12)}${text.length > 12 ? '...' : ''}`;
       } else if (obj instanceof fabric.Group) {
@@ -37,8 +40,6 @@ export default function LayerPanel() {
         }
       } else if (obj instanceof fabric.Line) { label = t('layerLine');
       } else if (obj instanceof fabric.Rect) {
-        // Detect wall/column by id prefix or fill color
-        const objId = (obj as fabric.FabricObject & { id?: string }).id || '';
         if (objId.startsWith('wall_')) label = t('layerWall');
         else if (objId.startsWith('column_')) label = t('layerColumn');
         else label = t('layerRect');

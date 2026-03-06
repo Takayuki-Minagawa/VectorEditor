@@ -17,6 +17,7 @@ const en: Record<TranslationKeys, string> = {
   tool_polyline: 'Polyline',
   tool_text: 'Text',
   tool_measure: 'LaTeX Measure',
+  tool_latex: 'LaTeX Math',
   tool_dimension: 'Dimension',
   tool_wall: 'Wall',
   tool_column: 'Column',
@@ -214,6 +215,12 @@ const en: Record<TranslationKeys, string> = {
   layerDimension: 'Dimension',
   layerWall: 'Wall',
   layerColumn: 'Column',
+  layerLatex: 'LaTeX Math',
+
+  latexInput: 'LaTeX Math Input',
+  latexFormula: 'Formula',
+  latexPlace: 'Place',
+  latexPreview: 'Preview',
 
   measureResult: 'LaTeX Coordinates',
   measureX: 'X (from bottom-left)',
