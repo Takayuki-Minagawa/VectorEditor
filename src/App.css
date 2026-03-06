@@ -29,7 +29,7 @@
   border-bottom: none;
 }
 
-.lang-switcher {
+.header-right {
   display: flex;
   align-items: center;
   gap: 3px;
@@ -609,6 +609,91 @@
 
 .shortcut-desc {
   color: #555;
+}
+
+/* ===== Help Manual Dialog ===== */
+.help-dialog {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 640px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.help-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.help-nav {
+  width: 160px;
+  min-width: 160px;
+  border-right: 1px solid #e8e8e8;
+  padding: 8px 0;
+  overflow-y: auto;
+  background: #fafafa;
+}
+
+.help-nav-item {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  color: #555;
+  transition: background 0.15s;
+}
+
+.help-nav-item:hover {
+  background: #f0f0f0;
+}
+
+.help-nav-item.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.help-content {
+  flex: 1;
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+
+.help-section-title {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.help-section-body p {
+  margin: 2px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #444;
+  white-space: pre-wrap;
+}
+
+.help-section-body p.help-gap {
+  height: 6px;
+}
+
+.help-footer {
+  padding: 8px 16px;
+  border-top: 1px solid #e8e8e8;
+  font-size: 11px;
+  color: #999;
+  text-align: right;
 }
 
 /* ===== Fabric.js overrides ===== */
