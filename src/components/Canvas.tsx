@@ -1,8 +1,15 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import type { ToolType } from '../types';
+
+interface MeasureResult {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 let objectCounter = 0;
 function generateId(type: string): string {
@@ -33,6 +40,9 @@ export default function Canvas() {
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
   const t = useI18n((s) => s.t);
+  const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
+  const [measureCopied, setMeasureCopied] = useState(false);
+  const measureShape = useRef<fabric.Rect | null>(null);
 
   const applyDefaults = useCallback((obj: fabric.FabricObject, id: string) => {
     obj.set({
@@ -270,6 +280,14 @@ export default function Canvas() {
       if (activeTool === 'select') return;
       const pointer = canvas.getScenePoint(opt.e);
 
+      // Measure tool: start drawing a temporary rectangle
+      if (activeTool === 'measure') {
+        isDrawing.current = true;
+        drawStart.current = { x: pointer.x, y: pointer.y };
+        canvas.selection = false;
+        return;
+      }
+
       // Polygon/Polyline tool: accumulate points
       if (activeTool === 'polygon' || activeTool === 'polyline') {
         polygonPoints.current.push({ x: pointer.x, y: pointer.y });
@@ -314,6 +332,30 @@ export default function Canvas() {
       if (!isDrawing.current || activeTool === 'select') return;
       const pointer = canvas.getScenePoint(opt.e);
 
+      // Measure tool preview
+      if (activeTool === 'measure') {
+        if (measureShape.current) {
+          canvas.remove(measureShape.current);
+        }
+        const left = Math.min(drawStart.current.x, pointer.x);
+        const top = Math.min(drawStart.current.y, pointer.y);
+        const w = Math.abs(pointer.x - drawStart.current.x);
+        const h = Math.abs(pointer.y - drawStart.current.y);
+        const rect = new fabric.Rect({
+          left, top, width: w, height: h,
+          fill: 'rgba(66,133,244,0.15)',
+          stroke: '#4285f4',
+          strokeWidth: 1,
+          strokeDashArray: [4, 4],
+          selectable: false,
+          evented: false,
+        });
+        canvas.add(rect);
+        measureShape.current = rect;
+        canvas.requestRenderAll();
+        return;
+      }
+
       // Remove previous preview
       if (currentShape.current) {
         canvas.remove(currentShape.current);
@@ -340,6 +382,30 @@ export default function Canvas() {
       if (!isDrawing.current || activeTool === 'select') return;
       isDrawing.current = false;
       const pointer = canvas.getScenePoint(opt.e);
+
+      // Measure tool: calculate LaTeX coordinates and show popup
+      if (activeTool === 'measure') {
+        if (measureShape.current) {
+          canvas.remove(measureShape.current);
+          measureShape.current = null;
+        }
+        const left = Math.min(drawStart.current.x, pointer.x);
+        const top = Math.min(drawStart.current.y, pointer.y);
+        const w = Math.abs(pointer.x - drawStart.current.x);
+        const h = Math.abs(pointer.y - drawStart.current.y);
+        if (w >= 2 || h >= 2) {
+          const ch = useEditorStore.getState().canvasHeight;
+          // LaTeX: origin bottom-left, y upward
+          const latexX = Math.round(left);
+          const latexY = Math.round(ch - (top + h));
+          setMeasureResult({ x: latexX, y: latexY, width: Math.round(w), height: Math.round(h) });
+          setMeasureCopied(false);
+        }
+        canvas.selection = true;
+        canvas.requestRenderAll();
+        setActiveTool('select');
+        return;
+      }
 
       // Remove preview
       if (currentShape.current) {
@@ -471,6 +537,15 @@ export default function Canvas() {
     );
   };
 
+  const handleCopyMeasure = () => {
+    if (!measureResult) return;
+    const text = `x=${measureResult.x}, y=${measureResult.y}, width=${measureResult.width}, height=${measureResult.height}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setMeasureCopied(true);
+      setTimeout(() => setMeasureCopied(false), 1500);
+    });
+  };
+
   return (
     <div className="canvas-wrapper" ref={wrapperRef}>
       <div
@@ -484,6 +559,28 @@ export default function Canvas() {
         <canvas ref={canvasRef} />
         {renderGrid()}
       </div>
+
+      {measureResult && (
+        <div className="modal-overlay" onClick={() => setMeasureResult(null)}>
+          <div className="measure-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="measure-popup-title">{t('measureResult')}</div>
+            <div className="measure-popup-body">
+              <div className="measure-row"><span className="measure-label">{t('measureX')}</span><span className="measure-val">{measureResult.x} px</span></div>
+              <div className="measure-row"><span className="measure-label">{t('measureY')}</span><span className="measure-val">{measureResult.y} px</span></div>
+              <div className="measure-row"><span className="measure-label">{t('measureWidth')}</span><span className="measure-val">{measureResult.width} px</span></div>
+              <div className="measure-row"><span className="measure-label">{t('measureHeight')}</span><span className="measure-val">{measureResult.height} px</span></div>
+            </div>
+            <div className="measure-popup-actions">
+              <button className="toolbar-btn" onClick={handleCopyMeasure}>
+                {measureCopied ? t('measureCopied') : t('measureCopy')}
+              </button>
+              <button className="toolbar-btn" onClick={() => setMeasureResult(null)}>
+                {t('measureClose')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

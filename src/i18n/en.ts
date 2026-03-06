@@ -16,6 +16,7 @@ const en: Record<TranslationKeys, string> = {
   tool_polygon: 'Polygon',
   tool_polyline: 'Polyline',
   tool_text: 'Text',
+  tool_measure: 'LaTeX Measure',
 
   file: 'File',
   edit: 'Edit',
@@ -160,7 +161,7 @@ const en: Record<TranslationKeys, string> = {
   help_overview_title: 'Overview',
   help_overview_body: 'This is a browser-based vector illustration editor. Create and edit shapes and illustrations for documents, manuals, proposals, and educational materials with an intuitive interface.',
   help_tools_title: 'Shape Tools',
-  help_tools_body: 'Select a tool from the left panel and drag on the canvas to create shapes.\n\n- Select: Click or drag to select objects\n- Line / Arrow: Drag from start to end point\n- Rect / Rounded / Circle / Ellipse / Triangle / Diamond: Drag to set size\n- Polygon / Polyline: Click to add vertices, double-click to finish\n- Text: Click to place a text box, double-click to edit',
+  help_tools_body: 'Select a tool from the left panel and drag on the canvas to create shapes.\n\n- Select: Click or drag to select objects\n- Line / Arrow: Drag from start to end point\n- Rect / Rounded / Circle / Ellipse / Triangle / Diamond: Drag to set size\n- Polygon / Polyline: Click to add vertices, double-click to finish\n- Text: Click to place a text box, double-click to edit\n- LaTeX Measure: Drag a rectangle to display position and size in LaTeX coordinates (bottom-left origin)',
   help_edit_title: 'Selection & Editing',
   help_edit_body: '- 8-direction resize handles for scaling\n- Top rotation handle to rotate (hold Shift for 15-degree snap)\n- Arrow keys to move 1px (Shift+Arrow for 10px)\n- Alt+Drag to clone and move objects\n- Right panel for numeric input of position, size, color, stroke, opacity\n- Select multiple objects for alignment and even distribution',
   help_file_title: 'File Operations',
@@ -193,6 +194,15 @@ const en: Record<TranslationKeys, string> = {
   preset_sq_medium: 'Square Medium',
   preset_sq_large: 'Square Large',
   preset_custom: 'Custom',
+
+  measureResult: 'LaTeX Coordinates',
+  measureX: 'X (from bottom-left)',
+  measureY: 'Y (from bottom-left)',
+  measureWidth: 'Width',
+  measureHeight: 'Height',
+  measureClose: 'Close',
+  measureCopy: 'Copy',
+  measureCopied: 'Copied',
 
   loadError: 'Failed to load file.',
   defaultText: 'Text',

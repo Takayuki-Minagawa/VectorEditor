@@ -22,6 +22,7 @@ const tools: ToolDef[] = [
   { tool: 'polygon', labelKey: 'tool_polygon', icon: '⬡' },
   { tool: 'polyline', labelKey: 'tool_polyline', icon: '⟋' },
   { tool: 'text', labelKey: 'tool_text', icon: 'T' },
+  { tool: 'measure', labelKey: 'tool_measure', icon: '📐' },
 ];
 
 export default function ToolPanel() {

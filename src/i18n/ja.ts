@@ -16,6 +16,7 @@ const ja = {
   tool_polygon: '多角形',
   tool_polyline: 'ポリライン',
   tool_text: '文字',
+  tool_measure: 'LaTeX計測',
 
   // Toolbar groups
   file: 'ファイル',
@@ -169,7 +170,7 @@ const ja = {
   help_overview_title: '概要',
   help_overview_body: 'このアプリはブラウザ上で動作するベクター挿絵エディタです。資料・マニュアル・提案書・教材に差し込むための図形やイラストを直感的に作成・編集できます。',
   help_tools_title: '図形ツール',
-  help_tools_body: '左パネルからツールを選択し、キャンバス上でドラッグして図形を作成します。\n\n・選択: オブジェクトのクリック選択、囲み選択\n・直線 / 矢印: ドラッグで始点から終点まで描画\n・矩形 / 角丸 / 円 / 楕円 / 三角 / ダイヤ: ドラッグでサイズ指定\n・多角形 / ポリライン: クリックで頂点を追加、ダブルクリックで確定\n・文字: クリックでテキストボックスを配置、ダブルクリックで編集',
+  help_tools_body: '左パネルからツールを選択し、キャンバス上でドラッグして図形を作成します。\n\n・選択: オブジェクトのクリック選択、囲み選択\n・直線 / 矢印: ドラッグで始点から終点まで描画\n・矩形 / 角丸 / 円 / 楕円 / 三角 / ダイヤ: ドラッグでサイズ指定\n・多角形 / ポリライン: クリックで頂点を追加、ダブルクリックで確定\n・文字: クリックでテキストボックスを配置、ダブルクリックで編集\n・LaTeX計測: ドラッグで矩形を描き、LaTeX座標系（左下原点）での位置と大きさを表示',
   help_edit_title: '選択と編集',
   help_edit_body: '・8方向のサイズハンドルでリサイズ\n・上部の回転ハンドルで回転（Shift押下で15度刻み）\n・矢印キーで1px移動（Shift+矢印で10px）\n・Alt+ドラッグでオブジェクトを複製移動\n・右パネルで位置・サイズ・色・線・透明度を数値指定\n・複数選択して整列・均等配置が可能',
   help_file_title: 'ファイル操作',
@@ -203,6 +204,16 @@ const ja = {
   preset_sq_medium: '正方形 中',
   preset_sq_large: '正方形 大',
   preset_custom: 'カスタム',
+
+  // Measure tool
+  measureResult: 'LaTeX座標',
+  measureX: 'X (左下基準)',
+  measureY: 'Y (左下基準)',
+  measureWidth: '幅',
+  measureHeight: '高さ',
+  measureClose: '閉じる',
+  measureCopy: 'コピー',
+  measureCopied: 'コピーしました',
 
   // Misc
   loadError: 'ファイルの読み込みに失敗しました。',

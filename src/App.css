@@ -701,6 +701,60 @@
   text-align: right;
 }
 
+/* ===== Measure Popup ===== */
+.measure-popup {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 300px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.measure-popup-title {
+  padding: 10px 16px;
+  font-weight: 600;
+  font-size: 14px;
+  border-bottom: 1px solid #e8e8e8;
+  background: #f8f9fa;
+}
+
+.measure-popup-body {
+  padding: 12px 16px;
+}
+
+.measure-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.measure-row:last-child {
+  border-bottom: none;
+}
+
+.measure-label {
+  color: #666;
+}
+
+.measure-val {
+  font-weight: 600;
+  font-family: monospace;
+  color: #333;
+}
+
+.measure-popup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 16px;
+  border-top: 1px solid #e8e8e8;
+  background: #f8f9fa;
+}
+
 /* ===== Fabric.js overrides ===== */
 .upper-canvas {
   cursor: inherit !important;

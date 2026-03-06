@@ -10,7 +10,8 @@ export type ToolType =
   | 'diamond'
   | 'polygon'
   | 'polyline'
-  | 'text';
+  | 'text'
+  | 'measure';
 
 export interface CanvasPreset {
   labelKey: string;
