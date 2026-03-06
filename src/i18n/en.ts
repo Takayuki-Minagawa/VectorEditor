@@ -169,12 +169,14 @@ const en: Record<TranslationKeys, string> = {
   help_edit_title: 'Selection & Editing',
   help_edit_body: '- 8-direction resize handles for scaling\n- Top rotation handle to rotate (hold Shift for 15-degree snap)\n- Arrow keys to move 1px (Shift+Arrow for 10px)\n- Alt+Drag to clone and move objects\n- Right panel for numeric input of position, size, color, stroke, opacity\n- Select multiple objects for alignment and even distribution',
   help_file_title: 'File Operations',
-  help_file_body: '- Save: Download as JSON (re-editable)\n- Load: Open a saved JSON file\n- Auto-save: Saves to browser every 10 seconds, restores on next visit\n- SVG Export: Vector format output\n- PNG Export: 2x resolution image output\n- PDF Export: Vector-quality PDF output',
+  help_file_body: '- Save: Download as JSON (re-editable)\n- Load: Open a saved JSON file\n- Import: Load SVG/PNG/JPG images\n  - SVG imported as editable objects\n  - Raster images auto-scaled to fit canvas\n- Auto-save: Saves to browser every 10 seconds, restores on next visit\n- SVG Export: Vector format output\n- PNG Export: 2x resolution image output\n- PDF Export: Vector-quality PDF output',
   help_layer_title: 'Layers & Arrangement',
   help_layer_body: '- Manage objects in the layer list at the bottom of the right panel\n- Eye icon to toggle visibility\n- Lock icon to toggle lock\n- Use toolbar "Arrange" to change z-order\n- Ctrl+G to group, Ctrl+Shift+G to ungroup',
   help_cad_title: 'CAD Mode',
   help_cad_body: 'Switch to 1:1 real-scale CAD mode using the "CAD" button in the status bar.\n\n[Features]\n- Internal coordinates are managed in mm (1:1 real scale)\n- Space+Drag or middle-button drag to pan\n- Mouse wheel to zoom toward cursor\n- Set drawing size (mm) in the right panel\n- Switch units between mm/cm/m\n\n[CAD Export]\n- Specify paper size (A0-A4) and scale (1:1 to 1:500)\n- Supports SVG/PNG/PDF formats\n- Drawing mm coordinates are converted to paper at the specified scale\n\n[Utilities]\n- Numeric Move: Move/copy selected objects precisely in mm\n- Stretch: Select a rectangular area and stretch objects within it',
   help_shortcut_title: 'Shortcuts',
+  help_guides_title: 'Smart Guides & Rulers',
+  help_guides_body: '[Smart Guides]\nEnable "Obj Snap" in the status bar. When moving objects, they will snap to edges and centers of other objects. Pink guide lines appear during snapping.\n\n[Rulers]\nToggle rulers with the "Rulers" button in the status bar. Click on a ruler to add a guide line.\n\n[Guide Lines]\n- Click on ruler to create a guide line\n- Enable "Guide Snap" to snap objects to guide lines\n- "Clear all guides" removes all guide lines at once',
   help_shortcut_body: 'Click the "?" button at the bottom right to view the full keyboard shortcut list.',
   help_version: 'Version',
 
@@ -277,6 +279,20 @@ const en: Record<TranslationKeys, string> = {
   cadExportBtn: 'Export',
   cadExportInfo: 'Export area',
   exportFormat: 'Format',
+
+  import: 'Import',
+  tip_import: 'Import SVG or image',
+  importError: 'Failed to import file.',
+
+  snapToObjects: 'Obj Snap',
+  snapToObjectsOn: 'Obj Snap ON',
+
+  rulers: 'Rulers',
+  guides: 'Guides',
+  deleteGuide: 'Delete guide',
+  clearGuides: 'Clear all guides',
+  snapToGuides: 'Guide Snap',
+  snapToGuidesOn: 'Guide Snap ON',
 
   loadError: 'Failed to load file.',
   defaultText: 'Text',

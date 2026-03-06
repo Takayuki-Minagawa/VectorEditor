@@ -26,6 +26,14 @@ export default function StatusBar() {
   const setCadUnit = useEditorStore((s) => s.setCadUnit);
   const cadWidth = useEditorStore((s) => s.cadWidth);
   const cadHeight = useEditorStore((s) => s.cadHeight);
+  const snapToObjects = useEditorStore((s) => s.snapToObjects);
+  const toggleSnapToObjects = useEditorStore((s) => s.toggleSnapToObjects);
+  const showRulers = useEditorStore((s) => s.showRulers);
+  const toggleRulers = useEditorStore((s) => s.toggleRulers);
+  const snapToGuides = useEditorStore((s) => s.snapToGuides);
+  const toggleSnapToGuides = useEditorStore((s) => s.toggleSnapToGuides);
+  const clearGuides = useEditorStore((s) => s.clearGuides);
+  const guidesCount = useEditorStore((s) => s.guides.length);
   const t = useI18n((s) => s.t);
 
   const objectCount = canvas ? canvas.getObjects().length : 0;
@@ -68,6 +76,12 @@ export default function StatusBar() {
         )}
         {snapToGrid && (
           <><span className="status-separator">|</span><span>{t('snapOn')}</span></>
+        )}
+        {snapToObjects && (
+          <><span className="status-separator">|</span><span>{t('snapToObjectsOn')}</span></>
+        )}
+        {snapToGuides && guidesCount > 0 && (
+          <><span className="status-separator">|</span><span>{t('snapToGuidesOn')}</span></>
         )}
       </div>
       <div className="status-right">
@@ -133,6 +147,37 @@ export default function StatusBar() {
           title={t('snapToGrid')}
         >
           {t('snapToGrid')}
+        </button>
+        <button
+          className={`status-snap-btn ${snapToObjects ? 'active' : ''}`}
+          onClick={toggleSnapToObjects}
+          title={t('snapToObjects')}
+        >
+          {t('snapToObjects')}
+        </button>
+        <button
+          className={`status-snap-btn ${snapToGuides ? 'active' : ''}`}
+          onClick={toggleSnapToGuides}
+          title={t('snapToGuides')}
+        >
+          {t('snapToGuides')}
+        </button>
+        {guidesCount > 0 && (
+          <button
+            className="status-snap-btn"
+            onClick={clearGuides}
+            title={t('clearGuides')}
+            style={{ fontSize: 9 }}
+          >
+            {t('clearGuides')}
+          </button>
+        )}
+        <button
+          className={`status-snap-btn ${showRulers ? 'active' : ''}`}
+          onClick={toggleRulers}
+          title={t('rulers')}
+        >
+          {t('rulers')}
         </button>
         <span className="status-separator">|</span>
         <button className="status-zoom-btn" onClick={() => { const idx = zoomLevels.findIndex((z) => z >= zoom); if (idx > 0) setZoom(zoomLevels[idx - 1]); }}>−</button>

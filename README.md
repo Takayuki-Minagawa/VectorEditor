@@ -29,11 +29,14 @@ A browser-based vector illustration editor for creating diagrams and illustratio
 - **Grouping** &mdash; Group and ungroup objects for batch operations
 - **Properties** &mdash; Numeric input for position, size, rotation; fill color, stroke color/width/dash, opacity, corner radius, and full text formatting
 - **Grid & Snap** &mdash; Toggle grid overlay with configurable grid size; snap-to-grid for precise placement
+- **Smart Guides** &mdash; Enable object snapping to align edges and centers with other objects; pink guide lines appear during snapping
+- **Rulers & Guide Lines** &mdash; Toggle rulers on top/left edges; click ruler to create guide lines; snap objects to guides
 - **Scale Display** &mdash; Selectable scale indicator (1:1 to 1:500)
 - **Canvas Presets** &mdash; A4/A3, US Letter, slides (16:9/4:3), OGP, Instagram, YouTube thumbnail, and more
 
 ### File & Export
 - **Save & Load** &mdash; JSON-based project files for full re-editing; auto-save to localStorage with CAD metadata
+- **Import** &mdash; Import SVG files as editable objects or raster images (PNG, JPG, GIF, WebP) with auto-scaling
 - **Export** &mdash; SVG (vector), PNG (2x resolution), and PDF (vector-quality) export; CAD mode uses paper+scale export dialog
 - **Undo / Redo** &mdash; Up to 50 history steps
 
@@ -107,8 +110,9 @@ src/
     LatexDialog.tsx     # LaTeX math input dialog with live preview
     NumericMoveDialog.tsx # Numeric move/copy dialog
     CadExportDialog.tsx  # CAD paper+scale export dialog
+    Rulers.tsx          # Ruler overlays and guide line creation
   store/
-    useEditorStore.ts   # Zustand store (canvas, history, selection, clipboard, grid, snap, scale)
+    useEditorStore.ts   # Zustand store (canvas, history, selection, clipboard, grid, snap, guides, scale)
   hooks/
     useKeyboardShortcuts.ts  # Global keyboard shortcut handler
     useAutoSave.ts           # Auto-save to localStorage
@@ -122,6 +126,12 @@ src/
 ```
 
 ## Changelog
+
+### v1.0.3
+- **Import SVG / Image** &mdash; Import SVG as editable objects or raster images (PNG, JPG, GIF, WebP) with auto-scaling
+- **Smart Guides** &mdash; Object-to-object snapping (edges and centers); pink guide lines displayed during alignment
+- **Rulers & Guide Lines** &mdash; Toggleable rulers on top/left edges; click ruler to create guide lines; guide snapping support; bulk guide clear
+- **Help manual** &mdash; Added Smart Guides & Rulers section
 
 ### v1.0.2
 - **CAD 1:1 viewport system** &mdash; Internal coordinates in real-world mm; viewport-based pan (Space+drag) and zoom (mouse wheel)
