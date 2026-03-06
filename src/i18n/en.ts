@@ -163,7 +163,7 @@ const en: Record<TranslationKeys, string> = {
   helpTitle: 'User Guide',
   helpBtn: 'Help',
   help_overview_title: 'Overview',
-  help_overview_body: 'This is a browser-based vector illustration editor. Create and edit shapes and illustrations for documents, manuals, proposals, and educational materials with an intuitive interface.',
+  help_overview_body: 'This is a browser-based vector illustration editor. Create and edit shapes and illustrations for documents, manuals, proposals, educational materials, and architectural drawings. Includes architecture tools (dimension, wall, column) and LaTeX math expression support.',
   help_tools_title: 'Shape Tools',
   help_tools_body: 'Select a tool from the left panel and drag on the canvas to create shapes.\n\n- Select: Click or drag to select objects\n- Line / Arrow: Drag from start to end point\n- Rect / Rounded / Circle / Ellipse / Triangle / Diamond: Drag to set size\n- Polygon / Polyline: Click to add vertices, double-click to finish\n- Text: Click to place a text box, double-click to edit\n- LaTeX Measure: Drag a rectangle to display position and size in LaTeX coordinates (bottom-left origin)\n\n[Architecture Tools]\n- Dimension: Drag to create a dimension line (auto-displays distance)\n- Wall: Drag to draw a wall segment (filled rectangle)\n- Column: Click to place a column (grid-sized square)',
   help_edit_title: 'Selection & Editing',

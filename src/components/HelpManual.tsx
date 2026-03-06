@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useI18n } from '../i18n/useI18n';
 import type { TranslationKeys } from '../i18n/ja';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 
 interface Section {
   titleKey: TranslationKeys;
