@@ -1,11 +1,17 @@
 import { create } from 'zustand';
 import * as fabric from 'fabric';
-import type { ToolType } from '../types';
+import type { ToolType, DrawingMode, CadUnit } from '../types';
 
 interface EditorStore {
   // Tool
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
+
+  // Drawing mode
+  drawingMode: DrawingMode;
+  setDrawingMode: (mode: DrawingMode) => void;
+  cadUnit: CadUnit;
+  setCadUnit: (unit: CadUnit) => void;
 
   // Canvas
   canvas: fabric.Canvas | null;
@@ -52,6 +58,11 @@ interface EditorStore {
 const MAX_HISTORY = 50;
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
+  drawingMode: 'illustration',
+  setDrawingMode: (mode) => set({ drawingMode: mode }),
+  cadUnit: 'mm',
+  setCadUnit: (unit) => set({ cadUnit: unit }),
+
   activeTool: 'select',
   setActiveTool: (tool) => {
     const { canvas } = get();

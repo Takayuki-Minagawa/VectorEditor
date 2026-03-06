@@ -247,6 +247,39 @@ const ja = {
   measureCopy: 'コピー',
   measureCopied: 'コピーしました',
 
+  // Stretch tool
+  tool_stretch: 'ストレッチ',
+  stretchTitle: 'ストレッチ',
+  stretchDesc: '選択範囲内のオブジェクトを引き伸ばします',
+  stretchOffsetX: 'X変形量',
+  stretchOffsetY: 'Y変形量',
+  stretchApply: '実行',
+  tip_stretch: '範囲選択してオブジェクトを引き伸ばし',
+
+  // Numeric move/copy
+  numericMove: '数値移動',
+  numericMoveTitle: '数値指定で移動/コピー',
+  offsetX: 'X移動量',
+  offsetY: 'Y移動量',
+  moveBtn: '移動',
+  copyBtn: 'コピー',
+  cancel: 'キャンセル',
+  tip_numericMove: '数値を指定して移動/コピー',
+  noSelection: 'オブジェクトを選択してください',
+
+  // Drawing mode
+  drawingMode: '描画モード',
+  modeIllustration: '挿絵',
+  modeCad: 'CAD',
+  cadUnit: '単位',
+  unit_mm: 'mm',
+  unit_cm: 'cm',
+  unit_m: 'm',
+  cadCanvasSize: 'キャンバス実寸',
+  cadGridSize: 'グリッド実寸',
+  tip_modeIllustration: '挿絵モード（ピクセル単位）',
+  tip_modeCad: 'CADモード（実寸法）',
+
   // Misc
   loadError: 'ファイルの読み込みに失敗しました。',
   defaultText: 'テキスト',

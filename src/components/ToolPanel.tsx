@@ -31,6 +31,7 @@ const allTools: ToolDef[] = [
   { tool: 'column', labelKey: 'tool_column', icon: '▪', category: 'arch' },
   { tool: 'latex', labelKey: 'tool_latex', icon: '∑', category: 'utility' },
   { tool: 'measure', labelKey: 'tool_measure', icon: '📐', category: 'utility' },
+  { tool: 'stretch', labelKey: 'tool_stretch', icon: '⇔', category: 'utility' },
 ];
 
 const categories: { key: ToolCategory; labelKey: TranslationKeys }[] = [

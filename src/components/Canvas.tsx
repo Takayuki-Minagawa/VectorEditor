@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
+import { parseScaleRatio, pxToReal, realToPx, formatReal } from '../types';
 import type { ToolType } from '../types';
 import LatexDialog from './LatexDialog';
 
@@ -19,6 +20,70 @@ function generateId(type: string): string {
 
 function snapVal(v: number, gridSize: number): number {
   return Math.round(v / gridSize) * gridSize;
+}
+
+function StretchDialog({
+  stretchDx, stretchDy, setStretchDx, setStretchDy, onApply, onCancel,
+}: {
+  stretchDx: number; stretchDy: number;
+  setStretchDx: (v: number) => void; setStretchDy: (v: number) => void;
+  onApply: () => void; onCancel: () => void;
+}) {
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const cadUnit = useEditorStore((s) => s.cadUnit);
+  const t = useI18n((s) => s.t);
+  const isCad = drawingMode === 'cad';
+  const unit = isCad ? cadUnit : 'px';
+  const step = isCad ? (cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001) : 1;
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-content nm-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <span>{t('stretchTitle')}</span>
+          <button className="modal-close" onClick={onCancel}>&times;</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{t('stretchDesc')}</p>
+          <div className="nm-row">
+            <label>{t('stretchOffsetX')} ({unit})</label>
+            <input type="number" value={stretchDx} onChange={(e) => setStretchDx(Number(e.target.value))} step={step} autoFocus />
+          </div>
+          <div className="nm-row">
+            <label>{t('stretchOffsetY')} ({unit})</label>
+            <input type="number" value={stretchDy} onChange={(e) => setStretchDy(Number(e.target.value))} step={step} />
+          </div>
+        </div>
+        <div className="nm-actions">
+          <button className="toolbar-btn nm-btn" onClick={onApply}>{t('stretchApply')}</button>
+          <button className="toolbar-btn nm-btn nm-cancel" onClick={onCancel}>{t('cancel')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MeasureBody({ result }: { result: MeasureResult }) {
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const cadUnit = useEditorStore((s) => s.cadUnit);
+  const scale = useEditorStore((s) => s.scale);
+  const t = useI18n((s) => s.t);
+  const isCad = drawingMode === 'cad';
+  const scaleRatio = parseScaleRatio(scale);
+
+  const fmt = (px: number) =>
+    isCad
+      ? `${formatReal(pxToReal(px, scaleRatio, cadUnit), cadUnit)} ${cadUnit}`
+      : `${px} px`;
+
+  return (
+    <div className="measure-popup-body">
+      <div className="measure-row"><span className="measure-label">{t('measureX')}</span><span className="measure-val">{fmt(result.x)}</span></div>
+      <div className="measure-row"><span className="measure-label">{t('measureY')}</span><span className="measure-val">{fmt(result.y)}</span></div>
+      <div className="measure-row"><span className="measure-label">{t('measureWidth')}</span><span className="measure-val">{fmt(result.width)}</span></div>
+      <div className="measure-row"><span className="measure-label">{t('measureHeight')}</span><span className="measure-val">{fmt(result.height)}</span></div>
+    </div>
+  );
 }
 
 export default function Canvas() {
@@ -51,6 +116,12 @@ export default function Canvas() {
   const [measureCopied, setMeasureCopied] = useState(false);
   const measureShape = useRef<fabric.Rect | null>(null);
   const [latexPlacement, setLatexPlacement] = useState<{ x: number; y: number } | null>(null);
+
+  // Stretch tool state
+  const stretchPreview = useRef<fabric.Rect | null>(null);
+  const [stretchBox, setStretchBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [stretchDx, setStretchDx] = useState(0);
+  const [stretchDy, setStretchDy] = useState(0);
 
   const snap = useCallback(
     (v: number) => (snapToGrid ? snapVal(v, gridSize) : v),
@@ -221,7 +292,10 @@ export default function Canvas() {
           // Label
           const midX = (startX + endX) / 2;
           const midY = (startY + endY) / 2;
-          const labelText = Math.round(dist).toString();
+          const { drawingMode, cadUnit, scale: storeScale } = useEditorStore.getState();
+          const labelText = drawingMode === 'cad'
+            ? `${formatReal(pxToReal(dist, parseScaleRatio(storeScale), cadUnit), cadUnit)} ${cadUnit}`
+            : Math.round(dist).toString();
           const label = new fabric.Text(labelText, {
             left: midX,
             top: midY - 14,
@@ -383,6 +457,14 @@ export default function Canvas() {
         return;
       }
 
+      // Stretch tool: start drawing crossing window
+      if (activeTool === 'stretch') {
+        isDrawing.current = true;
+        drawStart.current = { x: pointer.x, y: pointer.y };
+        canvas.selection = false;
+        return;
+      }
+
       // LaTeX tool: click to open dialog
       if (activeTool === 'latex') {
         setLatexPlacement({ x: pointer.x, y: pointer.y });
@@ -477,6 +559,30 @@ export default function Canvas() {
         return;
       }
 
+      // Stretch tool preview
+      if (activeTool === 'stretch') {
+        if (stretchPreview.current) {
+          canvas.remove(stretchPreview.current);
+        }
+        const left = Math.min(drawStart.current.x, pointer.x);
+        const top = Math.min(drawStart.current.y, pointer.y);
+        const w = Math.abs(pointer.x - drawStart.current.x);
+        const h = Math.abs(pointer.y - drawStart.current.y);
+        const rect = new fabric.Rect({
+          left, top, width: w, height: h,
+          fill: 'rgba(255,152,0,0.15)',
+          stroke: '#ff9800',
+          strokeWidth: 1,
+          strokeDashArray: [4, 4],
+          selectable: false,
+          evented: false,
+        });
+        canvas.add(rect);
+        stretchPreview.current = rect;
+        canvas.requestRenderAll();
+        return;
+      }
+
       // Remove previous preview
       if (currentShape.current) {
         canvas.remove(currentShape.current);
@@ -504,6 +610,26 @@ export default function Canvas() {
       isDrawing.current = false;
       const rawPointer = canvas.getScenePoint(opt.e);
       const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
+
+      // Stretch tool: save box and show dialog
+      if (activeTool === 'stretch') {
+        if (stretchPreview.current) {
+          canvas.remove(stretchPreview.current);
+          stretchPreview.current = null;
+        }
+        const left = Math.min(drawStart.current.x, pointer.x);
+        const top = Math.min(drawStart.current.y, pointer.y);
+        const w = Math.abs(pointer.x - drawStart.current.x);
+        const h = Math.abs(pointer.y - drawStart.current.y);
+        if (w >= 2 || h >= 2) {
+          setStretchBox({ left, top, width: w, height: h });
+          setStretchDx(0);
+          setStretchDy(0);
+        }
+        canvas.selection = true;
+        canvas.requestRenderAll();
+        return;
+      }
 
       // Measure tool: calculate LaTeX coordinates and show popup
       if (activeTool === 'measure') {
@@ -686,6 +812,114 @@ export default function Canvas() {
     setActiveTool('select');
   }, [setActiveTool]);
 
+  const handleStretchApply = () => {
+    const canvas = fabricRef.current;
+    if (!canvas || !stretchBox) return;
+
+    const { drawingMode, cadUnit, scale: storeScale } = useEditorStore.getState();
+    const isCad = drawingMode === 'cad';
+    const scaleRatio = parseScaleRatio(storeScale);
+
+    const dx = isCad ? realToPx(stretchDx, scaleRatio, cadUnit) : stretchDx;
+    const dy = isCad ? realToPx(stretchDy, scaleRatio, cadUnit) : stretchDy;
+
+    if (dx === 0 && dy === 0) {
+      setStretchBox(null);
+      setActiveTool('select');
+      return;
+    }
+
+    const box = stretchBox;
+    const boxRight = box.left + box.width;
+    const boxBottom = box.top + box.height;
+
+    const pointIn = (px: number, py: number) =>
+      px >= box.left && px <= boxRight && py >= box.top && py <= boxBottom;
+
+    canvas.getObjects().forEach((obj) => {
+      const bounds = obj.getBoundingRect();
+      const objRight = bounds.left + bounds.width;
+      const objBottom = bounds.top + bounds.height;
+
+      const tlIn = pointIn(bounds.left, bounds.top);
+      const trIn = pointIn(objRight, bounds.top);
+      const blIn = pointIn(bounds.left, objBottom);
+      const brIn = pointIn(objRight, objBottom);
+
+      const count = [tlIn, trIn, blIn, brIn].filter(Boolean).length;
+
+      if (count === 0) return;
+
+      if (count === 4) {
+        obj.set({ left: (obj.left || 0) + dx, top: (obj.top || 0) + dy });
+        obj.setCoords();
+        return;
+      }
+
+      // Partially inside — stretch logic
+      if (obj instanceof fabric.Rect && (obj.angle || 0) === 0) {
+        const leftSideIn = tlIn || blIn;
+        const rightSideIn = trIn || brIn;
+        const topSideIn = tlIn || trIn;
+        const bottomSideIn = blIn || brIn;
+
+        // X direction
+        if (dx !== 0) {
+          if (leftSideIn && rightSideIn) {
+            obj.set({ left: (obj.left || 0) + dx });
+          } else if (rightSideIn) {
+            const dw = (obj.width || 1) * (obj.scaleX || 1);
+            const newDw = dw + dx;
+            if (newDw > 1) obj.set({ scaleX: newDw / (obj.width || 1) });
+          } else if (leftSideIn) {
+            const dw = (obj.width || 1) * (obj.scaleX || 1);
+            const newDw = dw - dx;
+            if (newDw > 1) {
+              obj.set({ left: (obj.left || 0) + dx, scaleX: newDw / (obj.width || 1) });
+            }
+          }
+        }
+
+        // Y direction
+        if (dy !== 0) {
+          if (topSideIn && bottomSideIn) {
+            obj.set({ top: (obj.top || 0) + dy });
+          } else if (bottomSideIn) {
+            const dh = (obj.height || 1) * (obj.scaleY || 1);
+            const newDh = dh + dy;
+            if (newDh > 1) obj.set({ scaleY: newDh / (obj.height || 1) });
+          } else if (topSideIn) {
+            const dh = (obj.height || 1) * (obj.scaleY || 1);
+            const newDh = dh - dy;
+            if (newDh > 1) {
+              obj.set({ top: (obj.top || 0) + dy, scaleY: newDh / (obj.height || 1) });
+            }
+          }
+        }
+
+        obj.setCoords();
+      } else {
+        // For non-Rect objects: move if center is inside the box
+        const cx = bounds.left + bounds.width / 2;
+        const cy = bounds.top + bounds.height / 2;
+        if (pointIn(cx, cy)) {
+          obj.set({ left: (obj.left || 0) + dx, top: (obj.top || 0) + dy });
+          obj.setCoords();
+        }
+      }
+    });
+
+    canvas.requestRenderAll();
+    pushHistory();
+    setStretchBox(null);
+    setActiveTool('select');
+  };
+
+  const handleStretchCancel = () => {
+    setStretchBox(null);
+    setActiveTool('select');
+  };
+
   const handleCopyMeasure = () => {
     if (!measureResult) return;
     const text = `x=${measureResult.x}, y=${measureResult.y}, width=${measureResult.width}, height=${measureResult.height}`;
@@ -716,16 +950,22 @@ export default function Canvas() {
         />
       )}
 
+      {stretchBox && (
+        <StretchDialog
+          stretchDx={stretchDx}
+          stretchDy={stretchDy}
+          setStretchDx={setStretchDx}
+          setStretchDy={setStretchDy}
+          onApply={handleStretchApply}
+          onCancel={handleStretchCancel}
+        />
+      )}
+
       {measureResult && (
         <div className="modal-overlay" onClick={() => setMeasureResult(null)}>
           <div className="measure-popup" onClick={(e) => e.stopPropagation()}>
             <div className="measure-popup-title">{t('measureResult')}</div>
-            <div className="measure-popup-body">
-              <div className="measure-row"><span className="measure-label">{t('measureX')}</span><span className="measure-val">{measureResult.x} px</span></div>
-              <div className="measure-row"><span className="measure-label">{t('measureY')}</span><span className="measure-val">{measureResult.y} px</span></div>
-              <div className="measure-row"><span className="measure-label">{t('measureWidth')}</span><span className="measure-val">{measureResult.width} px</span></div>
-              <div className="measure-row"><span className="measure-label">{t('measureHeight')}</span><span className="measure-val">{measureResult.height} px</span></div>
-            </div>
+            <MeasureBody result={measureResult} />
             <div className="measure-popup-actions">
               <button className="toolbar-btn" onClick={handleCopyMeasure}>
                 {measureCopied ? t('measureCopied') : t('measureCopy')}

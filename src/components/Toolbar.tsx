@@ -1,11 +1,13 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import type { DocumentData } from '../types';
+import NumericMoveDialog from './NumericMoveDialog';
 
 export default function Toolbar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showNumericMove, setShowNumericMove] = useState(false);
   const canvas = useEditorStore((s) => s.canvas);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
@@ -19,6 +21,10 @@ export default function Toolbar() {
   const toggleGrid = useEditorStore((s) => s.toggleGrid);
   const t = useI18n((s) => s.t);
 
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const cadUnit = useEditorStore((s) => s.cadUnit);
+  const scale = useEditorStore((s) => s.scale);
+
   const handleSaveJSON = () => {
     if (!canvas) return;
     const data: DocumentData = {
@@ -26,6 +32,9 @@ export default function Toolbar() {
       canvas: { width: canvasWidth, height: canvasHeight, backgroundColor },
       objects: JSON.stringify(canvas.toObject(['id', 'name', 'selectable', 'evented'])),
       version: 1,
+      drawingMode,
+      cadUnit,
+      scale,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -47,9 +56,12 @@ export default function Toolbar() {
     reader.onload = (ev) => {
       try {
         const data: DocumentData = JSON.parse(ev.target?.result as string);
-        const { setCanvasSize, setBackgroundColor } = useEditorStore.getState();
+        const { setCanvasSize, setBackgroundColor, setDrawingMode, setCadUnit, setScale } = useEditorStore.getState();
         setCanvasSize(data.canvas.width, data.canvas.height);
         setBackgroundColor(data.canvas.backgroundColor);
+        if (data.drawingMode) setDrawingMode(data.drawingMode);
+        if (data.cadUnit) setCadUnit(data.cadUnit);
+        if (data.scale) setScale(data.scale);
         const json = JSON.parse(data.objects);
         canvas.loadFromJSON(json).then(() => {
           canvas.requestRenderAll();
@@ -247,6 +259,7 @@ export default function Toolbar() {
         <button className="toolbar-btn" onClick={handleDuplicate} title={t('tip_duplicate')}>{t('duplicate')}</button>
         <button className="toolbar-btn" onClick={handleDeleteSelected} title={t('tip_delete')}>{t('delete')}</button>
         <button className="toolbar-btn" onClick={handleSelectAll} title={t('tip_selectAll')}>{t('selectAll')}</button>
+        <button className="toolbar-btn" onClick={() => setShowNumericMove(true)} title={t('tip_numericMove')}>{t('numericMove')}</button>
       </div>
 
       <div className="toolbar-separator" />
@@ -288,6 +301,9 @@ export default function Toolbar() {
         <button className="toolbar-btn" onClick={handleExportPNG} title={t('tip_png')}>{t('png')}</button>
         <button className="toolbar-btn" onClick={handleExportPDF} title={t('tip_pdf')}>{t('pdf')}</button>
       </div>
+      {showNumericMove && (
+        <NumericMoveDialog onClose={() => setShowNumericMove(false)} />
+      )}
     </div>
   );
 }

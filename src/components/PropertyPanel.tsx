@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
-import { CANVAS_PRESETS } from '../types';
+import { CANVAS_PRESETS, parseScaleRatio, pxToReal, realToPx, formatReal } from '../types';
 import type { TranslationKeys } from '../i18n/ja';
 
 interface ObjProps {
@@ -29,7 +29,12 @@ export default function PropertyPanel() {
   const setCanvasSize = useEditorStore((s) => s.setCanvasSize);
   const backgroundColor = useEditorStore((s) => s.backgroundColor);
   const setBackgroundColor = useEditorStore((s) => s.setBackgroundColor);
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const cadUnit = useEditorStore((s) => s.cadUnit);
+  const scale = useEditorStore((s) => s.scale);
   const t = useI18n((s) => s.t);
+  const isCad = drawingMode === 'cad';
+  const scaleRatio = parseScaleRatio(scale);
 
   const [props, setProps] = useState<ObjProps>(defaultProps);
   const [isText, setIsText] = useState(false);
@@ -144,12 +149,24 @@ export default function PropertyPanel() {
       {hasSelection && (
         <>
           <div className="prop-section">
-            <div className="prop-section-title">{t('positionSize')}</div>
-            <div className="prop-row"><label>{t('x')}</label><input type="number" value={props.left} onChange={(e) => updateProp('left', Number(e.target.value))} onBlur={commitChange} /></div>
-            <div className="prop-row"><label>{t('y')}</label><input type="number" value={props.top} onChange={(e) => updateProp('top', Number(e.target.value))} onBlur={commitChange} /></div>
-            <div className="prop-row"><label>{t('width')}</label><input type="number" value={props.width} onChange={(e) => updateProp('width', Number(e.target.value))} onBlur={commitChange} min={1} /></div>
-            <div className="prop-row"><label>{t('height')}</label><input type="number" value={props.height} onChange={(e) => updateProp('height', Number(e.target.value))} onBlur={commitChange} min={1} /></div>
-            <div className="prop-row"><label>{t('rotation')}</label><input type="number" value={props.angle} onChange={(e) => updateProp('angle', Number(e.target.value))} onBlur={commitChange} /></div>
+            <div className="prop-section-title">{t('positionSize')}{isCad ? ` (${cadUnit})` : ''}</div>
+            {isCad ? (
+              <>
+                <div className="prop-row"><label>{t('x')}</label><input type="number" value={Number(formatReal(pxToReal(props.left, scaleRatio, cadUnit), cadUnit))} onChange={(e) => updateProp('left', realToPx(Number(e.target.value), scaleRatio, cadUnit))} onBlur={commitChange} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
+                <div className="prop-row"><label>{t('y')}</label><input type="number" value={Number(formatReal(pxToReal(props.top, scaleRatio, cadUnit), cadUnit))} onChange={(e) => updateProp('top', realToPx(Number(e.target.value), scaleRatio, cadUnit))} onBlur={commitChange} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
+                <div className="prop-row"><label>{t('width')}</label><input type="number" value={Number(formatReal(pxToReal(props.width, scaleRatio, cadUnit), cadUnit))} onChange={(e) => updateProp('width', realToPx(Number(e.target.value), scaleRatio, cadUnit))} onBlur={commitChange} min={0} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
+                <div className="prop-row"><label>{t('height')}</label><input type="number" value={Number(formatReal(pxToReal(props.height, scaleRatio, cadUnit), cadUnit))} onChange={(e) => updateProp('height', realToPx(Number(e.target.value), scaleRatio, cadUnit))} onBlur={commitChange} min={0} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
+                <div className="prop-row"><label>{t('rotation')}</label><input type="number" value={props.angle} onChange={(e) => updateProp('angle', Number(e.target.value))} onBlur={commitChange} /></div>
+              </>
+            ) : (
+              <>
+                <div className="prop-row"><label>{t('x')}</label><input type="number" value={props.left} onChange={(e) => updateProp('left', Number(e.target.value))} onBlur={commitChange} /></div>
+                <div className="prop-row"><label>{t('y')}</label><input type="number" value={props.top} onChange={(e) => updateProp('top', Number(e.target.value))} onBlur={commitChange} /></div>
+                <div className="prop-row"><label>{t('width')}</label><input type="number" value={props.width} onChange={(e) => updateProp('width', Number(e.target.value))} onBlur={commitChange} min={1} /></div>
+                <div className="prop-row"><label>{t('height')}</label><input type="number" value={props.height} onChange={(e) => updateProp('height', Number(e.target.value))} onBlur={commitChange} min={1} /></div>
+                <div className="prop-row"><label>{t('rotation')}</label><input type="number" value={props.angle} onChange={(e) => updateProp('angle', Number(e.target.value))} onBlur={commitChange} /></div>
+              </>
+            )}
           </div>
 
           <div className="prop-section">
