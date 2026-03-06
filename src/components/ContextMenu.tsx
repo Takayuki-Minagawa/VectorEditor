@@ -18,11 +18,13 @@ export default function ContextMenu() {
   useEffect(() => {
     if (!canvas) return;
     canvas.upperCanvasEl.addEventListener('contextmenu', (e) => e.preventDefault());
-    canvas.on('mouse:down:before', (opt: fabric.TEvent<MouseEvent>) => {
-      if (opt.e.button !== 2) close();
+    canvas.on('mouse:down:before', (opt) => {
+      const me = opt.e as MouseEvent;
+      if (me.button !== 2) close();
     });
-    canvas.on('mouse:up', (opt: fabric.TEvent<MouseEvent>) => {
-      if (opt.e.button === 2) setPos({ x: opt.e.clientX, y: opt.e.clientY });
+    canvas.on('mouse:up', (opt) => {
+      const me = opt.e as MouseEvent;
+      if (me.button === 2) setPos({ x: me.clientX, y: me.clientY });
     });
     return () => { canvas.off('mouse:down:before'); canvas.off('mouse:up'); };
   }, [canvas, close]);
@@ -81,7 +83,9 @@ export default function ContextMenu() {
   const handleUngroup = () => exec(() => {
     if (!isGroup) return;
     const items = (active as fabric.Group).getObjects();
-    (active as fabric.Group).destroy(); canvas.remove(active);
+    const group = active as fabric.Group;
+    group.remove(...items);
+    canvas.remove(active);
     const sel: fabric.FabricObject[] = [];
     items.forEach((item) => { canvas.add(item); sel.push(item); });
     canvas.setActiveObject(new fabric.ActiveSelection(sel, { canvas }));

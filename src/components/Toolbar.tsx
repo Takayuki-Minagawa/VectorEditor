@@ -24,7 +24,7 @@ export default function Toolbar() {
     const data: DocumentData = {
       documentId: `doc_${Date.now()}`,
       canvas: { width: canvasWidth, height: canvasHeight, backgroundColor },
-      objects: JSON.stringify(canvas.toJSON(['id', 'name', 'selectable', 'evented'])),
+      objects: JSON.stringify(canvas.toObject(['id', 'name', 'selectable', 'evented'])),
       version: 1,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

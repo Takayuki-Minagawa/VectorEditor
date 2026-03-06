@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import './App.css';
 import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
@@ -12,10 +12,9 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useAutoSave, loadAutoSave } from './hooks/useAutoSave';
 import { useEditorStore } from './store/useEditorStore';
 import { useI18n } from './i18n/useI18n';
-import type { Lang } from './i18n/useI18n';
 
 function App() {
-  const [restored, setRestored] = useState(false);
+  const restoredRef = useRef(false);
   const canvas = useEditorStore((s) => s.canvas);
   const lang = useI18n((s) => s.lang);
   const setLang = useI18n((s) => s.setLang);
@@ -26,7 +25,8 @@ function App() {
 
   // Restore from auto-save on startup
   useEffect(() => {
-    if (!canvas || restored) return;
+    if (!canvas || restoredRef.current) return;
+    restoredRef.current = true;
     const saved = loadAutoSave();
     if (saved) {
       const { setCanvasSize, setBackgroundColor, pushHistory } = useEditorStore.getState();
@@ -36,12 +36,9 @@ function App() {
       canvas.loadFromJSON(json).then(() => {
         canvas.requestRenderAll();
         pushHistory();
-        setRestored(true);
       });
-    } else {
-      setRestored(true);
     }
-  }, [canvas, restored]);
+  }, [canvas]);
 
   return (
     <div className="app">

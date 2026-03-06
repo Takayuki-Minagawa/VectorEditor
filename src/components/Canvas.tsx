@@ -266,7 +266,7 @@ export default function Canvas() {
     const canvas = fabricRef.current;
     if (!canvas) return;
 
-    const handleMouseDown = (opt: fabric.TEvent<MouseEvent>) => {
+    const handleMouseDown = (opt: fabric.TPointerEventInfo) => {
       if (activeTool === 'select') return;
       const pointer = canvas.getScenePoint(opt.e);
 
@@ -310,7 +310,7 @@ export default function Canvas() {
       canvas.selection = false;
     };
 
-    const handleMouseMove = (opt: fabric.TEvent<MouseEvent>) => {
+    const handleMouseMove = (opt: fabric.TPointerEventInfo) => {
       if (!isDrawing.current || activeTool === 'select') return;
       const pointer = canvas.getScenePoint(opt.e);
 
@@ -336,7 +336,7 @@ export default function Canvas() {
       }
     };
 
-    const handleMouseUp = (opt: fabric.TEvent<MouseEvent>) => {
+    const handleMouseUp = (opt: fabric.TPointerEventInfo) => {
       if (!isDrawing.current || activeTool === 'select') return;
       isDrawing.current = false;
       const pointer = canvas.getScenePoint(opt.e);
@@ -410,7 +410,7 @@ export default function Canvas() {
       canvas.off('mouse:up', handleMouseUp);
       canvas.off('mouse:dblclick', handleDblClick);
     };
-  }, [activeTool, applyDefaults, createShapeOnDrag, finishDrawing, setActiveTool, pushHistory]);
+  }, [activeTool, applyDefaults, createShapeOnDrag, finishDrawing, setActiveTool, pushHistory, t]);
 
   // Zoom handling
   useEffect(() => {
@@ -428,7 +428,7 @@ export default function Canvas() {
   const renderGrid = () => {
     if (!gridVisible) return null;
     const step = 20;
-    const lines: JSX.Element[] = [];
+    const lines: React.ReactElement[] = [];
     for (let x = 0; x <= canvasWidth; x += step) {
       lines.push(
         <line

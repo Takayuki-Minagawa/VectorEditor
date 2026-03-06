@@ -13,7 +13,6 @@ interface LayerItem {
 export default function LayerPanel() {
   const canvas = useEditorStore((s) => s.canvas);
   const selectedObjectIds = useEditorStore((s) => s.selectedObjectIds);
-  const pushHistory = useEditorStore((s) => s.pushHistory);
   const t = useI18n((s) => s.t);
   const [layers, setLayers] = useState<LayerItem[]>([]);
 
@@ -46,6 +45,7 @@ export default function LayerPanel() {
     setLayers(items.reverse());
   }, [canvas, t]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- refreshLayers reads external canvas state
   useEffect(() => { refreshLayers(); }, [selectedObjectIds, refreshLayers]);
 
   useEffect(() => {

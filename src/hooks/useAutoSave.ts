@@ -12,7 +12,7 @@ export function useAutoSave() {
       const { canvas, canvasWidth, canvasHeight, backgroundColor } = useEditorStore.getState();
       if (!canvas) return;
 
-      const json = JSON.stringify(canvas.toJSON(['id', 'name', 'selectable', 'evented']));
+      const json = JSON.stringify(canvas.toObject(['id', 'name', 'selectable', 'evented']));
       if (json === lastSaved.current) return;
 
       const data = {

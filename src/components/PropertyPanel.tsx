@@ -45,7 +45,8 @@ export default function PropertyPanel() {
       width: Math.round(bound.width), height: Math.round(bound.height),
       angle: Math.round(obj.angle || 0),
       fill: (typeof obj.fill === 'string' ? obj.fill : '') || '',
-      stroke: obj.stroke || '', strokeWidth: obj.strokeWidth || 0, opacity: obj.opacity ?? 1,
+      stroke: (typeof obj.stroke === 'string' ? obj.stroke : '') || '',
+      strokeWidth: obj.strokeWidth || 0, opacity: obj.opacity ?? 1,
       fontFamily: (obj as fabric.Textbox).fontFamily || 'sans-serif',
       fontSize: (obj as fabric.Textbox).fontSize || 24,
       fontWeight: String((obj as fabric.Textbox).fontWeight || 'normal'),
@@ -58,6 +59,7 @@ export default function PropertyPanel() {
     });
   }, [canvas]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- readProps reads external canvas state
   useEffect(() => { readProps(); }, [selectedObjectIds, readProps]);
 
   useEffect(() => {

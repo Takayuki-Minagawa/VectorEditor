@@ -108,7 +108,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   pushHistory: () => {
     const { canvas, history, historyIndex, _skipHistoryPush } = get();
     if (!canvas || _skipHistoryPush) return;
-    const json = JSON.stringify(canvas.toJSON(['id', 'name', 'selectable', 'evented']));
+    const json = JSON.stringify(canvas.toObject(['id', 'name', 'selectable', 'evented']));
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(json);
     if (newHistory.length > MAX_HISTORY) newHistory.shift();

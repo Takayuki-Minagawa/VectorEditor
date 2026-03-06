@@ -137,8 +137,8 @@ export function useKeyboardShortcuts() {
         e.preventDefault();
         const active = canvas.getActiveObject();
         if (active && active instanceof fabric.Group) {
-          const items = active.getObjects();
-          active.destroy();
+          const items = [...active.getObjects()];
+          active.remove(...items);
           canvas.remove(active);
           const sel: fabric.FabricObject[] = [];
           items.forEach((item) => {
