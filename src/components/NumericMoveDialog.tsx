@@ -3,6 +3,7 @@ import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import { unitToMm } from '../types';
+import { reassignObjectIdsRecursive } from '../utils/objectIds';
 
 interface Props {
   onClose: () => void;
@@ -47,6 +48,7 @@ export default function NumericMoveDialog({ onClose }: Props) {
     Promise.all(objects.map((obj) => obj.clone())).then((clones) => {
       canvas.discardActiveObject();
       clones.forEach((clone) => {
+        reassignObjectIdsRecursive(clone);
         clone.set({
           left: (clone.left || 0) + pxDx,
           top: (clone.top || 0) + pxDy,

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as fabric from 'fabric';
 import type { ToolType, DrawingMode, CadUnit } from '../types';
+import { ensureObjectIdsRecursive } from '../utils/objectIds';
 
 interface EditorStore {
   // Tool
@@ -148,6 +149,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const newIndex = historyIndex - 1;
     set({ _skipHistoryPush: true, historyIndex: newIndex });
     canvas.loadFromJSON(JSON.parse(history[newIndex])).then(() => {
+      canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
       canvas.requestRenderAll();
       set({ _skipHistoryPush: false });
     });
@@ -158,6 +160,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const newIndex = historyIndex + 1;
     set({ _skipHistoryPush: true, historyIndex: newIndex });
     canvas.loadFromJSON(JSON.parse(history[newIndex])).then(() => {
+      canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
       canvas.requestRenderAll();
       set({ _skipHistoryPush: false });
     });

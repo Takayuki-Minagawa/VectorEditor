@@ -1,6 +1,11 @@
 import { useEffect } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
+import {
+  assignNewObjectId,
+  ensureObjectIdsRecursive,
+  reassignObjectIdsRecursive,
+} from '../utils/objectIds';
 
 export function useKeyboardShortcuts() {
   useEffect(() => {
@@ -73,6 +78,7 @@ export function useKeyboardShortcuts() {
         e.preventDefault();
         if (clipboard && clipboard.length > 0) {
           clipboard[0].clone().then((cloned: fabric.FabricObject) => {
+            reassignObjectIdsRecursive(cloned);
             cloned.set({
               left: (cloned.left || 0) + 20,
               top: (cloned.top || 0) + 20,
@@ -98,6 +104,7 @@ export function useKeyboardShortcuts() {
         const active = canvas.getActiveObject();
         if (active) {
           active.clone().then((cloned: fabric.FabricObject) => {
+            reassignObjectIdsRecursive(cloned);
             cloned.set({
               left: (cloned.left || 0) + 20,
               top: (cloned.top || 0) + 20,
@@ -123,6 +130,7 @@ export function useKeyboardShortcuts() {
           const objects = active.getObjects();
           canvas.discardActiveObject();
           const group = new fabric.Group(objects);
+          assignNewObjectId(group, 'group');
           objects.forEach((obj) => canvas.remove(obj));
           canvas.add(group);
           canvas.setActiveObject(group);
@@ -142,6 +150,7 @@ export function useKeyboardShortcuts() {
           canvas.remove(active);
           const sel: fabric.FabricObject[] = [];
           items.forEach((item) => {
+            ensureObjectIdsRecursive(item);
             canvas.add(item);
             sel.push(item);
           });

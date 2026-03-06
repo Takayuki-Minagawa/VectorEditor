@@ -2,12 +2,14 @@ import { useEffect, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
+import { ensureObjectId } from '../utils/objectIds';
 
 interface LayerItem {
   id: string;
   label: string;
   visible: boolean;
   locked: boolean;
+  object: fabric.FabricObject;
 }
 
 export default function LayerPanel() {
@@ -19,9 +21,8 @@ export default function LayerPanel() {
   const refreshLayers = useCallback(() => {
     if (!canvas) return;
     const objects = canvas.getObjects();
-    const items: LayerItem[] = objects.map((obj, i) => {
-      const typed = obj as fabric.FabricObject & { id?: string };
-      const objId = typed.id || '';
+    const items: LayerItem[] = objects.map((obj) => {
+      const objId = ensureObjectId(obj);
       let label = obj.type || 'object';
       if (objId.startsWith('latex_')) {
         label = t('layerLatex');
@@ -50,10 +51,11 @@ export default function LayerPanel() {
       } else if (obj instanceof fabric.Polyline) { label = t('layerPolyline');
       }
       return {
-        id: typed.id || `obj_${i}`,
+        id: objId,
         label,
         visible: obj.visible !== false,
         locked: !!obj.lockMovementX,
+        object: obj,
       };
     });
     setLayers(items.reverse());
@@ -75,29 +77,26 @@ export default function LayerPanel() {
     };
   }, [canvas, refreshLayers]);
 
-  const findObj = (id: string) =>
-    canvas?.getObjects().find((o) => (o as fabric.FabricObject & { id?: string }).id === id);
-
-  const selectObject = (id: string) => {
+  const selectObject = (obj: fabric.FabricObject) => {
     if (!canvas) return;
-    const obj = findObj(id);
-    if (obj) { canvas.discardActiveObject(); canvas.setActiveObject(obj); canvas.requestRenderAll(); }
+    canvas.discardActiveObject();
+    canvas.setActiveObject(obj);
+    canvas.requestRenderAll();
   };
 
-  const toggleVisibility = (id: string) => {
+  const toggleVisibility = (obj: fabric.FabricObject) => {
     if (!canvas) return;
-    const obj = findObj(id);
-    if (obj) { obj.set({ visible: !obj.visible }); canvas.requestRenderAll(); }
+    obj.set({ visible: !obj.visible });
+    canvas.requestRenderAll();
+    refreshLayers();
   };
 
-  const toggleLock = (id: string) => {
+  const toggleLock = (obj: fabric.FabricObject) => {
     if (!canvas) return;
-    const obj = findObj(id);
-    if (obj) {
-      const locked = !obj.lockMovementX;
-      obj.set({ lockMovementX: locked, lockMovementY: locked, lockScalingX: locked, lockScalingY: locked, lockRotation: locked, hasControls: !locked });
-      canvas.requestRenderAll(); refreshLayers();
-    }
+    const locked = !obj.lockMovementX;
+    obj.set({ lockMovementX: locked, lockMovementY: locked, lockScalingX: locked, lockScalingY: locked, lockRotation: locked, hasControls: !locked });
+    canvas.requestRenderAll();
+    refreshLayers();
   };
 
   return (
@@ -105,24 +104,24 @@ export default function LayerPanel() {
       <div className="prop-section-title">{t('layers')}</div>
       {layers.length === 0 && <div className="layer-empty">{t('noObjects')}</div>}
       <div className="layer-list">
-        {layers.map((layer) => (
+        {layers.map((layer, index) => (
           <div
-            key={layer.id}
+            key={`${layer.id}_${index}`}
             className={`layer-item ${selectedObjectIds.includes(layer.id) ? 'selected' : ''}`}
-            onClick={() => selectObject(layer.id)}
+            onClick={() => selectObject(layer.object)}
           >
             <span className="layer-label">{layer.label}</span>
             <div className="layer-actions">
               <button
                 className={`layer-action-btn ${!layer.visible ? 'off' : ''}`}
-                onClick={(e) => { e.stopPropagation(); toggleVisibility(layer.id); }}
+                onClick={(e) => { e.stopPropagation(); toggleVisibility(layer.object); }}
                 title={layer.visible ? t('hide') : t('show')}
               >
                 {layer.visible ? '👁' : '−'}
               </button>
               <button
                 className={`layer-action-btn ${layer.locked ? 'on' : ''}`}
-                onClick={(e) => { e.stopPropagation(); toggleLock(layer.id); }}
+                onClick={(e) => { e.stopPropagation(); toggleLock(layer.object); }}
                 title={layer.locked ? t('unlock') : t('lock')}
               >
                 {layer.locked ? '🔒' : '🔓'}

@@ -3,6 +3,7 @@ import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import type { DocumentData } from '../types';
+import { ensureObjectIdsRecursive, reassignObjectIdsRecursive } from '../utils/objectIds';
 import NumericMoveDialog from './NumericMoveDialog';
 import CadExportDialog from './CadExportDialog';
 
@@ -72,6 +73,7 @@ export default function Toolbar() {
         if (data.cadWidth && data.cadHeight) setCadSize(data.cadWidth, data.cadHeight);
         const json = JSON.parse(data.objects);
         canvas.loadFromJSON(json).then(() => {
+          canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
           canvas.requestRenderAll();
           pushHistory();
         });
@@ -156,6 +158,7 @@ export default function Toolbar() {
     const active = canvas.getActiveObject();
     if (!active) return;
     active.clone().then((cloned: fabric.FabricObject) => {
+      reassignObjectIdsRecursive(cloned);
       cloned.set({ left: (cloned.left || 0) + 20, top: (cloned.top || 0) + 20 });
       if (cloned instanceof fabric.ActiveSelection) {
         cloned.forEachObject((obj: fabric.FabricObject) => {

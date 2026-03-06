@@ -10,9 +10,10 @@ import ContextMenu from './components/ContextMenu';
 import ShortcutHelp from './components/ShortcutHelp';
 import HelpManual from './components/HelpManual';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { useAutoSave, loadAutoSave } from './hooks/useAutoSave';
+import { clearAutoSave, loadAutoSave, useAutoSave } from './hooks/useAutoSave';
 import { useEditorStore } from './store/useEditorStore';
 import { useI18n } from './i18n/useI18n';
+import { ensureObjectIdsRecursive } from './utils/objectIds';
 
 function App() {
   const restoredRef = useRef(false);
@@ -34,17 +35,23 @@ function App() {
       setCanvasSize(saved.canvas.width, saved.canvas.height);
       setBackgroundColor(saved.canvas.backgroundColor);
       // Restore CAD settings if present
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const s = saved as any;
-      if (s.drawingMode) setDrawingMode(s.drawingMode);
-      if (s.cadUnit) setCadUnit(s.cadUnit);
-      if (s.scale) setScale(s.scale);
-      if (s.cadWidth && s.cadHeight) setCadSize(s.cadWidth, s.cadHeight);
-      const json = JSON.parse(saved.objects);
-      canvas.loadFromJSON(json).then(() => {
-        canvas.requestRenderAll();
-        pushHistory();
-      });
+      if (saved.drawingMode) setDrawingMode(saved.drawingMode);
+      if (saved.cadUnit) setCadUnit(saved.cadUnit);
+      if (saved.scale) setScale(saved.scale);
+      if (saved.cadWidth && saved.cadHeight) setCadSize(saved.cadWidth, saved.cadHeight);
+
+      try {
+        const json = JSON.parse(saved.objects);
+        canvas.loadFromJSON(json).then(() => {
+          canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
+          canvas.requestRenderAll();
+          pushHistory();
+        }).catch(() => {
+          clearAutoSave();
+        });
+      } catch {
+        clearAutoSave();
+      }
     }
   }, [canvas]);
 

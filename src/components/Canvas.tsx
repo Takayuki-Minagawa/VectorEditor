@@ -4,6 +4,11 @@ import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import { mmToUnit, unitToMm, formatReal } from '../types';
 import type { ToolType } from '../types';
+import {
+  ensureObjectId,
+  generateObjectId,
+  reassignObjectIdsRecursive,
+} from '../utils/objectIds';
 import LatexDialog from './LatexDialog';
 
 interface MeasureResult {
@@ -11,11 +16,6 @@ interface MeasureResult {
   y: number;
   width: number;
   height: number;
-}
-
-let objectCounter = 0;
-function generateId(type: string): string {
-  return `${type}_${++objectCounter}_${Date.now()}`;
 }
 
 function snapVal(v: number, gridSize: number): number {
@@ -181,7 +181,7 @@ export default function Canvas() {
       };
 
       let obj: fabric.FabricObject;
-      const id = generateId(tool);
+      const id = generateObjectId(tool);
 
       switch (tool) {
         case 'rect':
@@ -373,7 +373,7 @@ export default function Canvas() {
 
     const updateSelection = () => {
       const active = canvas.getActiveObjects();
-      const ids = active.map((o) => (o as fabric.FabricObject & { id?: string }).id || '').filter(Boolean);
+      const ids = active.map((obj) => ensureObjectId(obj));
       setSelectedObjectIds(ids);
     };
 
@@ -391,6 +391,7 @@ export default function Canvas() {
         const original = opt.target;
         if (!original) return;
         original.clone().then((cloned: fabric.FabricObject) => {
+          reassignObjectIdsRecursive(cloned);
           cloned.set({ left: original.left, top: original.top, opacity: 0.5 });
           canvas.add(cloned);
           altClone = cloned;
@@ -491,7 +492,7 @@ export default function Canvas() {
       // Column tool: click to place
       if (activeTool === 'column') {
         const sz = gridSize > 0 ? gridSize : 20;
-        const id = generateId('column');
+        const id = generateObjectId('column');
         const col = new fabric.Rect({
           left: snap(rawPointer.x) - sz / 2,
           top: snap(rawPointer.y) - sz / 2,
@@ -525,7 +526,7 @@ export default function Canvas() {
 
       // Text tool: place text on click
       if (activeTool === 'text') {
-        const id = generateId('text');
+        const id = generateObjectId('text');
         const textbox = new fabric.Textbox(t('defaultText'), {
           left: pointer.x,
           top: pointer.y,
@@ -679,10 +680,15 @@ export default function Canvas() {
         const w = Math.abs(pointer.x - drawStart.current.x);
         const h = Math.abs(pointer.y - drawStart.current.y);
         if (w >= 2 || h >= 2) {
-          const ch = useEditorStore.getState().canvasHeight;
+          const {
+            drawingMode: mode,
+            canvasHeight: currentCanvasHeight,
+            cadHeight: currentCadHeight,
+          } = useEditorStore.getState();
+          const docHeight = mode === 'cad' ? currentCadHeight : currentCanvasHeight;
           // LaTeX: origin bottom-left, y upward
           const latexX = Math.round(left);
-          const latexY = Math.round(ch - (top + h));
+          const latexY = Math.round(docHeight - (top + h));
           setMeasureResult({ x: latexX, y: latexY, width: Math.round(w), height: Math.round(h) });
           setMeasureCopied(false);
         }
@@ -727,7 +733,7 @@ export default function Canvas() {
         const points = [...polygonPoints.current];
         polygonPoints.current = [];
 
-        const id = generateId(activeTool);
+        const id = generateObjectId(activeTool);
         let obj: fabric.FabricObject;
 
         if (activeTool === 'polygon') {
@@ -1025,7 +1031,7 @@ export default function Canvas() {
           scaleX: 1 / 3,
           scaleY: 1 / 3,
         });
-        const id = generateId('latex');
+        const id = generateObjectId('latex');
         applyDefaults(img, id);
         canvas.add(img);
         finishDrawing(img);

@@ -2,6 +2,11 @@ import { useEffect, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
+import {
+  assignNewObjectId,
+  ensureObjectIdsRecursive,
+  reassignObjectIdsRecursive,
+} from '../utils/objectIds';
 
 interface MenuPos { x: number; y: number; }
 
@@ -53,6 +58,7 @@ export default function ContextMenu() {
   const handlePaste = () => exec(() => {
     if (!clipboard || clipboard.length === 0) return;
     clipboard[0].clone().then((cloned: fabric.FabricObject) => {
+      reassignObjectIdsRecursive(cloned);
       cloned.set({ left: (cloned.left || 0) + 20, top: (cloned.top || 0) + 20 });
       if (cloned instanceof fabric.ActiveSelection) cloned.forEachObject((obj: fabric.FabricObject) => canvas.add(obj));
       else canvas.add(cloned);
@@ -62,6 +68,7 @@ export default function ContextMenu() {
   const handleDuplicate = () => exec(() => {
     if (!active) return;
     active.clone().then((cloned: fabric.FabricObject) => {
+      reassignObjectIdsRecursive(cloned);
       cloned.set({ left: (cloned.left || 0) + 20, top: (cloned.top || 0) + 20 });
       if (cloned instanceof fabric.ActiveSelection) cloned.forEachObject((obj: fabric.FabricObject) => canvas.add(obj));
       else canvas.add(cloned);
@@ -77,6 +84,7 @@ export default function ContextMenu() {
     const objects = (active as fabric.ActiveSelection).getObjects();
     canvas.discardActiveObject();
     const group = new fabric.Group(objects);
+    assignNewObjectId(group, 'group');
     objects.forEach((o) => canvas.remove(o));
     canvas.add(group); canvas.setActiveObject(group); canvas.requestRenderAll(); pushHistory();
   });
@@ -87,7 +95,7 @@ export default function ContextMenu() {
     group.remove(...items);
     canvas.remove(active);
     const sel: fabric.FabricObject[] = [];
-    items.forEach((item) => { canvas.add(item); sel.push(item); });
+    items.forEach((item) => { ensureObjectIdsRecursive(item); canvas.add(item); sel.push(item); });
     canvas.setActiveObject(new fabric.ActiveSelection(sel, { canvas }));
     canvas.requestRenderAll(); pushHistory();
   });
