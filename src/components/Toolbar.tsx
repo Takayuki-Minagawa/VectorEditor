@@ -1,5 +1,7 @@
 import { useRef } from 'react';
+import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
+import { useI18n } from '../i18n/useI18n';
 import type { DocumentData } from '../types';
 
 export default function Toolbar() {
@@ -15,6 +17,7 @@ export default function Toolbar() {
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const gridVisible = useEditorStore((s) => s.gridVisible);
   const toggleGrid = useEditorStore((s) => s.toggleGrid);
+  const t = useI18n((s) => s.t);
 
   const handleSaveJSON = () => {
     if (!canvas) return;
@@ -53,7 +56,7 @@ export default function Toolbar() {
           pushHistory();
         });
       } catch {
-        alert('ファイルの読み込みに失敗しました。');
+        alert(t('loadError'));
       }
     };
     reader.readAsText(file);
@@ -124,83 +127,49 @@ export default function Toolbar() {
     });
   };
 
-  // Z-order
   const bringForward = () => {
     if (!canvas) return;
     const obj = canvas.getActiveObject();
-    if (obj) {
-      canvas.bringObjectForward(obj);
-      canvas.requestRenderAll();
-      pushHistory();
-    }
+    if (obj) { canvas.bringObjectForward(obj); canvas.requestRenderAll(); pushHistory(); }
   };
   const sendBackward = () => {
     if (!canvas) return;
     const obj = canvas.getActiveObject();
-    if (obj) {
-      canvas.sendObjectBackwards(obj);
-      canvas.requestRenderAll();
-      pushHistory();
-    }
+    if (obj) { canvas.sendObjectBackwards(obj); canvas.requestRenderAll(); pushHistory(); }
   };
   const bringToFront = () => {
     if (!canvas) return;
     const obj = canvas.getActiveObject();
-    if (obj) {
-      canvas.bringObjectToFront(obj);
-      canvas.requestRenderAll();
-      pushHistory();
-    }
+    if (obj) { canvas.bringObjectToFront(obj); canvas.requestRenderAll(); pushHistory(); }
   };
   const sendToBack = () => {
     if (!canvas) return;
     const obj = canvas.getActiveObject();
-    if (obj) {
-      canvas.sendObjectToBack(obj);
-      canvas.requestRenderAll();
-      pushHistory();
-    }
+    if (obj) { canvas.sendObjectToBack(obj); canvas.requestRenderAll(); pushHistory(); }
   };
 
-  // Alignment
   const alignObjects = (alignment: string) => {
     if (!canvas) return;
     const activeObj = canvas.getActiveObject();
     if (!activeObj || !(activeObj instanceof fabric.ActiveSelection)) return;
     const objects = activeObj.getObjects();
     if (objects.length < 2) return;
-
     const bound = activeObj.getBoundingRect();
-
     objects.forEach((obj) => {
       const objBound = obj.getBoundingRect();
       switch (alignment) {
         case 'left':
-          obj.set({ left: (obj.left || 0) + (bound.left - objBound.left) });
-          break;
+          obj.set({ left: (obj.left || 0) + (bound.left - objBound.left) }); break;
         case 'centerH':
-          obj.set({
-            left: (obj.left || 0) + (bound.left + bound.width / 2 - (objBound.left + objBound.width / 2)),
-          });
-          break;
+          obj.set({ left: (obj.left || 0) + (bound.left + bound.width / 2 - (objBound.left + objBound.width / 2)) }); break;
         case 'right':
-          obj.set({
-            left: (obj.left || 0) + (bound.left + bound.width - (objBound.left + objBound.width)),
-          });
-          break;
+          obj.set({ left: (obj.left || 0) + (bound.left + bound.width - (objBound.left + objBound.width)) }); break;
         case 'top':
-          obj.set({ top: (obj.top || 0) + (bound.top - objBound.top) });
-          break;
+          obj.set({ top: (obj.top || 0) + (bound.top - objBound.top) }); break;
         case 'centerV':
-          obj.set({
-            top: (obj.top || 0) + (bound.top + bound.height / 2 - (objBound.top + objBound.height / 2)),
-          });
-          break;
+          obj.set({ top: (obj.top || 0) + (bound.top + bound.height / 2 - (objBound.top + objBound.height / 2)) }); break;
         case 'bottom':
-          obj.set({
-            top: (obj.top || 0) + (bound.top + bound.height - (objBound.top + objBound.height)),
-          });
-          break;
+          obj.set({ top: (obj.top || 0) + (bound.top + bound.height - (objBound.top + objBound.height)) }); break;
       }
       obj.setCoords();
     });
@@ -208,112 +177,91 @@ export default function Toolbar() {
     pushHistory();
   };
 
+  const distributeObjects = (direction: 'horizontal' | 'vertical') => {
+    if (!canvas) return;
+    const activeObj = canvas.getActiveObject();
+    if (!activeObj || !(activeObj instanceof fabric.ActiveSelection)) return;
+    const objects = activeObj.getObjects();
+    if (objects.length < 3) return;
+    const bounds = objects.map((obj) => ({ obj, rect: obj.getBoundingRect() }));
+    if (direction === 'horizontal') {
+      bounds.sort((a, b) => a.rect.left - b.rect.left);
+      const totalWidth = bounds.reduce((sum, b) => sum + b.rect.width, 0);
+      const first = bounds[0].rect.left;
+      const last = bounds[bounds.length - 1].rect.left + bounds[bounds.length - 1].rect.width;
+      const gap = (last - first - totalWidth) / (bounds.length - 1);
+      let x = first;
+      bounds.forEach((b) => { b.obj.set({ left: (b.obj.left || 0) + (x - b.rect.left) }); b.obj.setCoords(); x += b.rect.width + gap; });
+    } else {
+      bounds.sort((a, b) => a.rect.top - b.rect.top);
+      const totalHeight = bounds.reduce((sum, b) => sum + b.rect.height, 0);
+      const first = bounds[0].rect.top;
+      const last = bounds[bounds.length - 1].rect.top + bounds[bounds.length - 1].rect.height;
+      const gap = (last - first - totalHeight) / (bounds.length - 1);
+      let y = first;
+      bounds.forEach((b) => { b.obj.set({ top: (b.obj.top || 0) + (y - b.rect.top) }); b.obj.setCoords(); y += b.rect.height + gap; });
+    }
+    canvas.requestRenderAll();
+    pushHistory();
+  };
+
   return (
     <div className="toolbar">
       <div className="toolbar-group">
-        <span className="toolbar-group-label">ファイル</span>
-        <button className="toolbar-btn" onClick={handleSaveJSON} title="JSON保存">
-          保存
-        </button>
-        <button className="toolbar-btn" onClick={handleLoadJSON} title="JSON読込">
-          読込
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          style={{ display: 'none' }}
-          onChange={handleFileChange}
-        />
+        <span className="toolbar-group-label">{t('file')}</span>
+        <button className="toolbar-btn" onClick={handleSaveJSON} title={t('tip_save')}>{t('save')}</button>
+        <button className="toolbar-btn" onClick={handleLoadJSON} title={t('tip_load')}>{t('load')}</button>
+        <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileChange} />
       </div>
 
       <div className="toolbar-separator" />
 
       <div className="toolbar-group">
-        <span className="toolbar-group-label">編集</span>
-        <button className="toolbar-btn" onClick={undo} disabled={historyIndex <= 0} title="元に戻す (Ctrl+Z)">
-          戻す
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={redo}
-          disabled={historyIndex >= historyLength - 1}
-          title="やり直し (Ctrl+Y)"
-        >
-          やり直し
-        </button>
-        <button className="toolbar-btn" onClick={handleDuplicate} title="複製 (Ctrl+D)">
-          複製
-        </button>
-        <button className="toolbar-btn" onClick={handleDeleteSelected} title="削除 (Delete)">
-          削除
-        </button>
-        <button className="toolbar-btn" onClick={handleSelectAll} title="全選択 (Ctrl+A)">
-          全選択
-        </button>
+        <span className="toolbar-group-label">{t('edit')}</span>
+        <button className="toolbar-btn" onClick={undo} disabled={historyIndex <= 0} title={t('tip_undo')}>{t('undo')}</button>
+        <button className="toolbar-btn" onClick={redo} disabled={historyIndex >= historyLength - 1} title={t('tip_redo')}>{t('redo')}</button>
+        <button className="toolbar-btn" onClick={handleDuplicate} title={t('tip_duplicate')}>{t('duplicate')}</button>
+        <button className="toolbar-btn" onClick={handleDeleteSelected} title={t('tip_delete')}>{t('delete')}</button>
+        <button className="toolbar-btn" onClick={handleSelectAll} title={t('tip_selectAll')}>{t('selectAll')}</button>
       </div>
 
       <div className="toolbar-separator" />
 
       <div className="toolbar-group">
-        <span className="toolbar-group-label">配置</span>
-        <button className="toolbar-btn" onClick={bringToFront} title="最前面">
-          最前面
-        </button>
-        <button className="toolbar-btn" onClick={bringForward} title="前面">
-          前面
-        </button>
-        <button className="toolbar-btn" onClick={sendBackward} title="背面">
-          背面
-        </button>
-        <button className="toolbar-btn" onClick={sendToBack} title="最背面">
-          最背面
-        </button>
+        <span className="toolbar-group-label">{t('arrange')}</span>
+        <button className="toolbar-btn" onClick={bringToFront} title={t('tip_toFront')}>{t('toFront')}</button>
+        <button className="toolbar-btn" onClick={bringForward} title={t('tip_forward')}>{t('forward')}</button>
+        <button className="toolbar-btn" onClick={sendBackward} title={t('tip_backward')}>{t('backward')}</button>
+        <button className="toolbar-btn" onClick={sendToBack} title={t('tip_toBack')}>{t('toBack')}</button>
       </div>
 
       <div className="toolbar-separator" />
 
       <div className="toolbar-group">
-        <span className="toolbar-group-label">整列</span>
-        <button className="toolbar-btn" onClick={() => alignObjects('left')} title="左揃え">
-          左
-        </button>
-        <button className="toolbar-btn" onClick={() => alignObjects('centerH')} title="左右中央">
-          中央H
-        </button>
-        <button className="toolbar-btn" onClick={() => alignObjects('right')} title="右揃え">
-          右
-        </button>
-        <button className="toolbar-btn" onClick={() => alignObjects('top')} title="上揃え">
-          上
-        </button>
-        <button className="toolbar-btn" onClick={() => alignObjects('centerV')} title="上下中央">
-          中央V
-        </button>
-        <button className="toolbar-btn" onClick={() => alignObjects('bottom')} title="下揃え">
-          下
-        </button>
+        <span className="toolbar-group-label">{t('align')}</span>
+        <button className="toolbar-btn" onClick={() => alignObjects('left')} title={t('tip_alignLeft')}>{t('alignLeft')}</button>
+        <button className="toolbar-btn" onClick={() => alignObjects('centerH')} title={t('tip_alignCenterH')}>{t('alignCenterH')}</button>
+        <button className="toolbar-btn" onClick={() => alignObjects('right')} title={t('tip_alignRight')}>{t('alignRight')}</button>
+        <button className="toolbar-btn" onClick={() => alignObjects('top')} title={t('tip_alignTop')}>{t('alignTop')}</button>
+        <button className="toolbar-btn" onClick={() => alignObjects('centerV')} title={t('tip_alignCenterV')}>{t('alignCenterV')}</button>
+        <button className="toolbar-btn" onClick={() => alignObjects('bottom')} title={t('tip_alignBottom')}>{t('alignBottom')}</button>
+        <button className="toolbar-btn" onClick={() => distributeObjects('horizontal')} title={t('tip_distributeH')}>{t('distributeH')}</button>
+        <button className="toolbar-btn" onClick={() => distributeObjects('vertical')} title={t('tip_distributeV')}>{t('distributeV')}</button>
       </div>
 
       <div className="toolbar-separator" />
 
       <div className="toolbar-group">
-        <span className="toolbar-group-label">表示</span>
-        <button className={`toolbar-btn ${gridVisible ? 'active' : ''}`} onClick={toggleGrid}>
-          グリッド
-        </button>
+        <span className="toolbar-group-label">{t('view')}</span>
+        <button className={`toolbar-btn ${gridVisible ? 'active' : ''}`} onClick={toggleGrid}>{t('grid')}</button>
       </div>
 
       <div className="toolbar-separator" />
 
       <div className="toolbar-group">
-        <span className="toolbar-group-label">書き出し</span>
-        <button className="toolbar-btn" onClick={handleExportSVG} title="SVG書き出し">
-          SVG
-        </button>
-        <button className="toolbar-btn" onClick={handleExportPNG} title="PNG書き出し">
-          PNG
-        </button>
+        <span className="toolbar-group-label">{t('export')}</span>
+        <button className="toolbar-btn" onClick={handleExportSVG} title={t('tip_svg')}>{t('svg')}</button>
+        <button className="toolbar-btn" onClick={handleExportPNG} title={t('tip_png')}>{t('png')}</button>
       </div>
     </div>
   );

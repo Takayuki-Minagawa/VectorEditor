@@ -4,14 +4,22 @@ import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import ToolPanel from './components/ToolPanel';
 import PropertyPanel from './components/PropertyPanel';
+import LayerPanel from './components/LayerPanel';
 import StatusBar from './components/StatusBar';
+import ContextMenu from './components/ContextMenu';
+import ShortcutHelp from './components/ShortcutHelp';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useAutoSave, loadAutoSave } from './hooks/useAutoSave';
 import { useEditorStore } from './store/useEditorStore';
+import { useI18n } from './i18n/useI18n';
+import type { Lang } from './i18n/useI18n';
 
 function App() {
   const [restored, setRestored] = useState(false);
   const canvas = useEditorStore((s) => s.canvas);
+  const lang = useI18n((s) => s.lang);
+  const setLang = useI18n((s) => s.setLang);
+  const t = useI18n((s) => s.t);
 
   useKeyboardShortcuts();
   useAutoSave();
@@ -37,13 +45,35 @@ function App() {
 
   return (
     <div className="app">
-      <Toolbar />
+      <div className="app-header">
+        <Toolbar />
+        <div className="lang-switcher">
+          <span className="toolbar-group-label">{t('language')}</span>
+          <button
+            className={`lang-btn ${lang === 'ja' ? 'active' : ''}`}
+            onClick={() => setLang('ja')}
+          >
+            日本語
+          </button>
+          <button
+            className={`lang-btn ${lang === 'en' ? 'active' : ''}`}
+            onClick={() => setLang('en')}
+          >
+            EN
+          </button>
+        </div>
+      </div>
       <div className="app-body">
         <ToolPanel />
         <Canvas />
-        <PropertyPanel />
+        <div className="right-panels">
+          <PropertyPanel />
+          <LayerPanel />
+        </div>
       </div>
       <StatusBar />
+      <ContextMenu />
+      <ShortcutHelp />
     </div>
   );
 }

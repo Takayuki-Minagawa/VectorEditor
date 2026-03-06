@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
+import { useI18n } from '../i18n/useI18n';
 import type { ToolType } from '../types';
 
 let objectCounter = 0;
@@ -31,6 +32,7 @@ export default function Canvas() {
 
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
+  const t = useI18n((s) => s.t);
 
   const applyDefaults = useCallback((obj: fabric.FabricObject, id: string) => {
     obj.set({
@@ -287,7 +289,7 @@ export default function Canvas() {
       // Text tool: place text on click
       if (activeTool === 'text') {
         const id = generateId('text');
-        const textbox = new fabric.Textbox('テキスト', {
+        const textbox = new fabric.Textbox(t('defaultText'), {
           left: pointer.x,
           top: pointer.y,
           width: 200,

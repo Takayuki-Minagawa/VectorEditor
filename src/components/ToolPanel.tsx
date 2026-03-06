@@ -1,43 +1,46 @@
 import { useEditorStore } from '../store/useEditorStore';
+import { useI18n } from '../i18n/useI18n';
 import type { ToolType } from '../types';
+import type { TranslationKeys } from '../i18n/ja';
 
 interface ToolDef {
   tool: ToolType;
-  label: string;
+  labelKey: TranslationKeys;
   icon: string;
 }
 
 const tools: ToolDef[] = [
-  { tool: 'select', label: '選択', icon: '⊹' },
-  { tool: 'line', label: '直線', icon: '╲' },
-  { tool: 'arrow', label: '矢印', icon: '→' },
-  { tool: 'rect', label: '矩形', icon: '□' },
-  { tool: 'roundedRect', label: '角丸', icon: '▢' },
-  { tool: 'circle', label: '円', icon: '○' },
-  { tool: 'ellipse', label: '楕円', icon: '⬮' },
-  { tool: 'triangle', label: '三角', icon: '△' },
-  { tool: 'diamond', label: 'ダイヤ', icon: '◇' },
-  { tool: 'polygon', label: '多角形', icon: '⬡' },
-  { tool: 'polyline', label: 'ポリライン', icon: '⟋' },
-  { tool: 'text', label: '文字', icon: 'T' },
+  { tool: 'select', labelKey: 'tool_select', icon: '⊹' },
+  { tool: 'line', labelKey: 'tool_line', icon: '╲' },
+  { tool: 'arrow', labelKey: 'tool_arrow', icon: '→' },
+  { tool: 'rect', labelKey: 'tool_rect', icon: '□' },
+  { tool: 'roundedRect', labelKey: 'tool_roundedRect', icon: '▢' },
+  { tool: 'circle', labelKey: 'tool_circle', icon: '○' },
+  { tool: 'ellipse', labelKey: 'tool_ellipse', icon: '⬮' },
+  { tool: 'triangle', labelKey: 'tool_triangle', icon: '△' },
+  { tool: 'diamond', labelKey: 'tool_diamond', icon: '◇' },
+  { tool: 'polygon', labelKey: 'tool_polygon', icon: '⬡' },
+  { tool: 'polyline', labelKey: 'tool_polyline', icon: '⟋' },
+  { tool: 'text', labelKey: 'tool_text', icon: 'T' },
 ];
 
 export default function ToolPanel() {
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
+  const t = useI18n((s) => s.t);
 
   return (
     <div className="tool-panel">
-      <div className="panel-title">ツール</div>
-      {tools.map((t) => (
+      <div className="panel-title">{t('tools')}</div>
+      {tools.map((td) => (
         <button
-          key={t.tool}
-          className={`tool-btn ${activeTool === t.tool ? 'active' : ''}`}
-          onClick={() => setActiveTool(t.tool)}
-          title={t.label}
+          key={td.tool}
+          className={`tool-btn ${activeTool === td.tool ? 'active' : ''}`}
+          onClick={() => setActiveTool(td.tool)}
+          title={t(td.labelKey)}
         >
-          <span className="tool-icon">{t.icon}</span>
-          <span className="tool-label">{t.label}</span>
+          <span className="tool-icon">{td.icon}</span>
+          <span className="tool-label">{t(td.labelKey)}</span>
         </button>
       ))}
     </div>
