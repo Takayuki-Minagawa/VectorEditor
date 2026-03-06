@@ -225,9 +225,20 @@
   position: relative;
 }
 
+.canvas-wrapper.cad-mode {
+  overflow: hidden;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
 .canvas-container {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
   background: #fff;
+}
+
+.cad-mode .canvas-container {
+  box-shadow: none;
+  background: transparent;
 }
 
 .canvas-container canvas {

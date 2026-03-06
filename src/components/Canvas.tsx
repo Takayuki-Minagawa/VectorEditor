@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
-import { parseScaleRatio, pxToReal, realToPx, formatReal } from '../types';
+import { mmToUnit, unitToMm, formatReal } from '../types';
 import type { ToolType } from '../types';
 import LatexDialog from './LatexDialog';
 
@@ -66,15 +66,13 @@ function StretchDialog({
 function MeasureBody({ result }: { result: MeasureResult }) {
   const drawingMode = useEditorStore((s) => s.drawingMode);
   const cadUnit = useEditorStore((s) => s.cadUnit);
-  const scale = useEditorStore((s) => s.scale);
   const t = useI18n((s) => s.t);
   const isCad = drawingMode === 'cad';
-  const scaleRatio = parseScaleRatio(scale);
 
-  const fmt = (px: number) =>
+  const fmt = (val: number) =>
     isCad
-      ? `${formatReal(pxToReal(px, scaleRatio, cadUnit), cadUnit)} ${cadUnit}`
-      : `${px} px`;
+      ? `${formatReal(mmToUnit(val, cadUnit), cadUnit)} ${cadUnit}`
+      : `${val} px`;
 
   return (
     <div className="measure-popup-body">
@@ -96,6 +94,13 @@ export default function Canvas() {
   const polygonPoints = useRef<{ x: number; y: number }[]>([]);
   const polygonLines = useRef<fabric.Line[]>([]);
 
+  // CAD viewport refs
+  const isPanning = useRef(false);
+  const lastPanPoint = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const spacePressed = useRef(false);
+  const zoomFromWheel = useRef(false);
+  const cadInitDone = useRef(false);
+
   const {
     setCanvas,
     canvasWidth,
@@ -111,6 +116,9 @@ export default function Canvas() {
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
   const gridSize = useEditorStore((s) => s.gridSize);
   const snapToGrid = useEditorStore((s) => s.snapToGrid);
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const cadWidth = useEditorStore((s) => s.cadWidth);
+  const cadHeight = useEditorStore((s) => s.cadHeight);
   const t = useI18n((s) => s.t);
   const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
   const [measureCopied, setMeasureCopied] = useState(false);
@@ -292,9 +300,9 @@ export default function Canvas() {
           // Label
           const midX = (startX + endX) / 2;
           const midY = (startY + endY) / 2;
-          const { drawingMode, cadUnit, scale: storeScale } = useEditorStore.getState();
-          const labelText = drawingMode === 'cad'
-            ? `${formatReal(pxToReal(dist, parseScaleRatio(storeScale), cadUnit), cadUnit)} ${cadUnit}`
+          const { drawingMode: dm, cadUnit: cu } = useEditorStore.getState();
+          const labelText = dm === 'cad'
+            ? `${formatReal(mmToUnit(dist, cu), cu)} ${cu}`
             : Math.round(dist).toString();
           const label = new fabric.Text(labelText, {
             left: midX,
@@ -445,6 +453,15 @@ export default function Canvas() {
     if (!canvas) return;
 
     const handleMouseDown = (opt: fabric.TPointerEventInfo) => {
+      // CAD pan: Space+left click or middle mouse button
+      const currentMode = useEditorStore.getState().drawingMode;
+      if (currentMode === 'cad' && (spacePressed.current || (opt.e as MouseEvent).button === 1)) {
+        isPanning.current = true;
+        lastPanPoint.current = { x: (opt.e as MouseEvent).clientX, y: (opt.e as MouseEvent).clientY };
+        canvas.defaultCursor = 'grabbing';
+        return;
+      }
+
       if (activeTool === 'select') return;
       const rawPointer = canvas.getScenePoint(opt.e);
       const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
@@ -531,6 +548,18 @@ export default function Canvas() {
     };
 
     const handleMouseMove = (opt: fabric.TPointerEventInfo) => {
+      // CAD panning
+      if (isPanning.current) {
+        const vpt = canvas.viewportTransform;
+        if (vpt) {
+          vpt[4] += (opt.e as MouseEvent).clientX - lastPanPoint.current.x;
+          vpt[5] += (opt.e as MouseEvent).clientY - lastPanPoint.current.y;
+          lastPanPoint.current = { x: (opt.e as MouseEvent).clientX, y: (opt.e as MouseEvent).clientY };
+          canvas.setViewportTransform(vpt);
+        }
+        return;
+      }
+
       if (!isDrawing.current || activeTool === 'select') return;
       const rawPointer = canvas.getScenePoint(opt.e);
       const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
@@ -606,6 +635,14 @@ export default function Canvas() {
     };
 
     const handleMouseUp = (opt: fabric.TPointerEventInfo) => {
+      // CAD pan end
+      if (isPanning.current) {
+        isPanning.current = false;
+        const tool = useEditorStore.getState().activeTool;
+        canvas.defaultCursor = spacePressed.current ? 'grab' : (tool === 'select' ? 'default' : 'crosshair');
+        return;
+      }
+
       if (!isDrawing.current || activeTool === 'select') return;
       isDrawing.current = false;
       const rawPointer = canvas.getScenePoint(opt.e);
@@ -726,21 +763,212 @@ export default function Canvas() {
     };
   }, [activeTool, applyDefaults, createShapeOnDrag, finishDrawing, setActiveTool, pushHistory, t, snap, gridSize]);
 
-  // Zoom handling
+  // Combined mode switch + zoom handling
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    canvas.setZoom(zoom);
-    canvas.setDimensions({
-      width: canvasWidth * zoom,
-      height: canvasHeight * zoom,
-    });
-    canvas.requestRenderAll();
-  }, [zoom, canvasWidth, canvasHeight]);
 
-  // Draw grid overlay
+    if (drawingMode === 'cad') {
+      if (!cadInitDone.current) {
+        // First time in CAD mode: set up viewport
+        cadInitDone.current = true;
+        const wrapper = wrapperRef.current;
+        if (wrapper) {
+          const rect = wrapper.getBoundingClientRect();
+          const w = rect.width || 800;
+          const h = rect.height || 600;
+          canvas.setDimensions({ width: w, height: h });
+          canvas.backgroundColor = '#f5f5f5';
+
+          const fitZoom = Math.min(w / cadWidth, h / cadHeight) * 0.9;
+          const panX = (w - cadWidth * fitZoom) / 2;
+          const panY = (h - cadHeight * fitZoom) / 2;
+          canvas.setViewportTransform([fitZoom, 0, 0, fitZoom, panX, panY]);
+
+          zoomFromWheel.current = true;
+          useEditorStore.setState({ zoom: fitZoom });
+        }
+      } else if (!zoomFromWheel.current) {
+        // Zoom from StatusBar — zoom toward canvas center
+        const center = new fabric.Point(canvas.width! / 2, canvas.height! / 2);
+        canvas.zoomToPoint(center, zoom);
+      }
+      zoomFromWheel.current = false;
+    } else {
+      if (cadInitDone.current) {
+        // Leaving CAD mode: restore
+        cadInitDone.current = false;
+        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        canvas.backgroundColor = useEditorStore.getState().backgroundColor;
+      }
+      canvas.setZoom(zoom);
+      canvas.setDimensions({
+        width: canvasWidth * zoom,
+        height: canvasHeight * zoom,
+      });
+    }
+    canvas.requestRenderAll();
+  }, [zoom, canvasWidth, canvasHeight, drawingMode, cadWidth, cadHeight]);
+
+  // CAD mode: ResizeObserver to keep canvas filling wrapper
+  useEffect(() => {
+    if (drawingMode !== 'cad') return;
+    const canvas = fabricRef.current;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) {
+        canvas.setDimensions({ width, height });
+        canvas.requestRenderAll();
+      }
+    });
+
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [drawingMode]);
+
+  // CAD mode: mouse wheel zoom
+  useEffect(() => {
+    if (drawingMode !== 'cad') return;
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+
+    const handleWheel = (opt: fabric.TPointerEventInfo<WheelEvent>) => {
+      const e = opt.e;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const delta = e.deltaY;
+      let newZoom = canvas.getZoom() * (1 - delta / 300);
+      newZoom = Math.max(0.001, Math.min(100, newZoom));
+
+      const point = canvas.getScenePoint(e);
+      canvas.zoomToPoint(new fabric.Point(point.x, point.y), newZoom);
+
+      zoomFromWheel.current = true;
+      useEditorStore.setState({ zoom: newZoom });
+      canvas.requestRenderAll();
+    };
+
+    canvas.on('mouse:wheel', handleWheel);
+    return () => { canvas.off('mouse:wheel', handleWheel); };
+  }, [drawingMode]);
+
+  // CAD mode: Space key for panning cursor
+  useEffect(() => {
+    if (drawingMode !== 'cad') {
+      spacePressed.current = false;
+      return;
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault();
+        spacePressed.current = true;
+        const canvas = fabricRef.current;
+        if (canvas) canvas.defaultCursor = 'grab';
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spacePressed.current = false;
+        const canvas = fabricRef.current;
+        const tool = useEditorStore.getState().activeTool;
+        if (canvas) canvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      spacePressed.current = false;
+    };
+  }, [drawingMode]);
+
+  // CAD mode: render grid and document bounds via after:render
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    if (drawingMode !== 'cad') {
+      canvas.requestRenderAll();
+      return;
+    }
+
+    const handler = () => {
+      const ctx = canvas.getContext();
+      const vpt = canvas.viewportTransform;
+      if (!vpt) return;
+
+      const z = canvas.getZoom();
+      const panX = vpt[4];
+      const panY = vpt[5];
+      const w = canvas.width || 0;
+      const h = canvas.height || 0;
+      const cw = useEditorStore.getState().cadWidth;
+      const ch = useEditorStore.getState().cadHeight;
+
+      // Draw document bounds (dashed border only, no fill to avoid covering objects)
+      const dx0 = panX;
+      const dy0 = panY;
+      const dw = cw * z;
+      const dh = ch * z;
+      ctx.save();
+      ctx.strokeStyle = '#bbb';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(dx0, dy0, dw, dh);
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Draw grid
+      if (gridVisible && gridSize > 0) {
+        const left = -panX / z;
+        const top = -panY / z;
+        const right = left + w / z;
+        const bottom = top + h / z;
+
+        const step = gridSize;
+        const startX = Math.floor(left / step) * step;
+        const startY = Math.floor(top / step) * step;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(200,200,200,0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+
+        for (let x = startX; x <= right; x += step) {
+          const sx = x * z + panX;
+          ctx.moveTo(sx, 0);
+          ctx.lineTo(sx, h);
+        }
+        for (let y = startY; y <= bottom; y += step) {
+          const sy = y * z + panY;
+          ctx.moveTo(0, sy);
+          ctx.lineTo(w, sy);
+        }
+
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+
+    canvas.on('after:render', handler);
+    canvas.requestRenderAll();
+    return () => {
+      canvas.off('after:render', handler);
+      canvas.requestRenderAll();
+    };
+  }, [drawingMode, gridVisible, gridSize]);
+
+  // Draw grid overlay (illustration mode only)
   const renderGrid = () => {
-    if (!gridVisible) return null;
+    if (!gridVisible || drawingMode === 'cad') return null;
     const step = gridSize;
     const lines: React.ReactElement[] = [];
     for (let x = 0; x <= canvasWidth; x += step) {
@@ -816,12 +1044,11 @@ export default function Canvas() {
     const canvas = fabricRef.current;
     if (!canvas || !stretchBox) return;
 
-    const { drawingMode, cadUnit, scale: storeScale } = useEditorStore.getState();
-    const isCad = drawingMode === 'cad';
-    const scaleRatio = parseScaleRatio(storeScale);
+    const { drawingMode: dm, cadUnit: cu } = useEditorStore.getState();
+    const isCad = dm === 'cad';
 
-    const dx = isCad ? realToPx(stretchDx, scaleRatio, cadUnit) : stretchDx;
-    const dy = isCad ? realToPx(stretchDy, scaleRatio, cadUnit) : stretchDy;
+    const dx = isCad ? unitToMm(stretchDx, cu) : stretchDx;
+    const dy = isCad ? unitToMm(stretchDy, cu) : stretchDy;
 
     if (dx === 0 && dy === 0) {
       setStretchBox(null);
@@ -929,11 +1156,17 @@ export default function Canvas() {
     });
   };
 
+  const isCadMode = drawingMode === 'cad';
+
   return (
-    <div className="canvas-wrapper" ref={wrapperRef}>
+    <div className={`canvas-wrapper ${isCadMode ? 'cad-mode' : ''}`} ref={wrapperRef}>
       <div
         className="canvas-container"
-        style={{
+        style={isCadMode ? {
+          width: '100%',
+          height: '100%',
+          position: 'relative',
+        } : {
           width: canvasWidth * zoom,
           height: canvasHeight * zoom,
           position: 'relative',

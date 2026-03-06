@@ -2,7 +2,7 @@ import { useState } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
-import { parseScaleRatio, realToPx } from '../types';
+import { unitToMm } from '../types';
 
 interface Props {
   onClose: () => void;
@@ -13,22 +13,20 @@ export default function NumericMoveDialog({ onClose }: Props) {
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const drawingMode = useEditorStore((s) => s.drawingMode);
   const cadUnit = useEditorStore((s) => s.cadUnit);
-  const scale = useEditorStore((s) => s.scale);
   const t = useI18n((s) => s.t);
 
   const [dx, setDx] = useState(0);
   const [dy, setDy] = useState(0);
 
   const isCad = drawingMode === 'cad';
-  const scaleRatio = parseScaleRatio(scale);
   const unit = isCad ? cadUnit : 'px';
 
-  const toPx = (val: number) => (isCad ? realToPx(val, scaleRatio, cadUnit) : val);
+  const toInternal = (val: number) => (isCad ? unitToMm(val, cadUnit) : val);
 
   const handleMove = () => {
     if (!canvas) return;
-    const pxDx = toPx(dx);
-    const pxDy = toPx(dy);
+    const pxDx = toInternal(dx);
+    const pxDy = toInternal(dy);
     const objects = canvas.getActiveObjects();
     if (objects.length === 0) return;
     objects.forEach((obj) => {
@@ -42,8 +40,8 @@ export default function NumericMoveDialog({ onClose }: Props) {
 
   const handleCopy = () => {
     if (!canvas) return;
-    const pxDx = toPx(dx);
-    const pxDy = toPx(dy);
+    const pxDx = toInternal(dx);
+    const pxDy = toInternal(dy);
     const objects = canvas.getActiveObjects();
     if (objects.length === 0) return;
     Promise.all(objects.map((obj) => obj.clone())).then((clones) => {

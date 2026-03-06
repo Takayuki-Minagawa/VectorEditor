@@ -9,7 +9,7 @@ export function useAutoSave() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const { canvas, canvasWidth, canvasHeight, backgroundColor, drawingMode, cadUnit, scale } = useEditorStore.getState();
+      const { canvas, canvasWidth, canvasHeight, backgroundColor, drawingMode, cadUnit, scale, cadWidth, cadHeight } = useEditorStore.getState();
       if (!canvas) return;
 
       const json = JSON.stringify(canvas.toObject(['id', 'name', 'selectable', 'evented']));
@@ -21,6 +21,8 @@ export function useAutoSave() {
         drawingMode,
         cadUnit,
         scale,
+        cadWidth,
+        cadHeight,
         savedAt: new Date().toISOString(),
       };
 

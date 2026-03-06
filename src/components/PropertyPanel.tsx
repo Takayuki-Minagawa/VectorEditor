@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
-import { CANVAS_PRESETS, parseScaleRatio, pxToReal, realToPx, formatReal } from '../types';
+import { CANVAS_PRESETS, mmToUnit, unitToMm, formatReal } from '../types';
 import type { TranslationKeys } from '../i18n/ja';
 
 interface ObjProps {
@@ -31,10 +31,11 @@ export default function PropertyPanel() {
   const setBackgroundColor = useEditorStore((s) => s.setBackgroundColor);
   const drawingMode = useEditorStore((s) => s.drawingMode);
   const cadUnit = useEditorStore((s) => s.cadUnit);
-  const scale = useEditorStore((s) => s.scale);
+  const cadWidth = useEditorStore((s) => s.cadWidth);
+  const cadHeight = useEditorStore((s) => s.cadHeight);
+  const setCadSize = useEditorStore((s) => s.setCadSize);
   const t = useI18n((s) => s.t);
   const isCad = drawingMode === 'cad';
-  const scaleRatio = parseScaleRatio(scale);
 
   const [props, setProps] = useState<ObjProps>(defaultProps);
   const [isText, setIsText] = useState(false);
@@ -103,47 +104,66 @@ export default function PropertyPanel() {
   return (
     <div className="property-panel">
       <div className="prop-section">
-        <div className="prop-section-title">{t('canvas')}</div>
-        <div className="prop-row">
-          <label>{t('presetSize')}</label>
-          <select
-            className="preset-select"
-            value={
-              CANVAS_PRESETS.find((p) => p.width === canvasWidth && p.height === canvasHeight)?.labelKey
-              || 'preset_custom'
-            }
-            onChange={(e) => {
-              const preset = CANVAS_PRESETS.find((p) => p.labelKey === e.target.value);
-              if (preset && preset.width > 0) setCanvasSize(preset.width, preset.height);
-            }}
-          >
-            {(['doc', 'slide', 'web', 'common', 'custom'] as const).map((cat) => {
-              const catKey = `preset_cat_${cat}` as TranslationKeys;
-              const items = CANVAS_PRESETS.filter((p) => p.category === cat);
-              return (
-                <optgroup key={cat} label={t(catKey)}>
-                  {items.map((p) => (
-                    <option key={p.labelKey} value={p.labelKey}>
-                      {t(p.labelKey as TranslationKeys)}{p.width > 0 ? ` (${p.width}x${p.height})` : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })}
-          </select>
-        </div>
-        <div className="prop-row">
-          <label>{t('width')}</label>
-          <input type="number" value={canvasWidth} onChange={(e) => setCanvasSize(Number(e.target.value), canvasHeight)} min={100} />
-        </div>
-        <div className="prop-row">
-          <label>{t('height')}</label>
-          <input type="number" value={canvasHeight} onChange={(e) => setCanvasSize(canvasWidth, Number(e.target.value))} min={100} />
-        </div>
-        <div className="prop-row">
-          <label>{t('bgColor')}</label>
-          <input type="color" value={backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} />
-        </div>
+        <div className="prop-section-title">{isCad ? t('cadDocSize') : t('canvas')}</div>
+        {isCad ? (
+          <>
+            <div className="prop-row">
+              <label>{t('cadDocWidth')}</label>
+              <input type="number" value={cadWidth} onChange={(e) => setCadSize(Number(e.target.value), cadHeight)} min={100} step={100} />
+            </div>
+            <div className="prop-row">
+              <label>{t('cadDocHeight')}</label>
+              <input type="number" value={cadHeight} onChange={(e) => setCadSize(cadWidth, Number(e.target.value))} min={100} step={100} />
+            </div>
+            <div className="prop-row">
+              <label>{t('bgColor')}</label>
+              <input type="color" value={backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="prop-row">
+              <label>{t('presetSize')}</label>
+              <select
+                className="preset-select"
+                value={
+                  CANVAS_PRESETS.find((p) => p.width === canvasWidth && p.height === canvasHeight)?.labelKey
+                  || 'preset_custom'
+                }
+                onChange={(e) => {
+                  const preset = CANVAS_PRESETS.find((p) => p.labelKey === e.target.value);
+                  if (preset && preset.width > 0) setCanvasSize(preset.width, preset.height);
+                }}
+              >
+                {(['doc', 'slide', 'web', 'common', 'custom'] as const).map((cat) => {
+                  const catKey = `preset_cat_${cat}` as TranslationKeys;
+                  const items = CANVAS_PRESETS.filter((p) => p.category === cat);
+                  return (
+                    <optgroup key={cat} label={t(catKey)}>
+                      {items.map((p) => (
+                        <option key={p.labelKey} value={p.labelKey}>
+                          {t(p.labelKey as TranslationKeys)}{p.width > 0 ? ` (${p.width}x${p.height})` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
+              </select>
+            </div>
+            <div className="prop-row">
+              <label>{t('width')}</label>
+              <input type="number" value={canvasWidth} onChange={(e) => setCanvasSize(Number(e.target.value), canvasHeight)} min={100} />
+            </div>
+            <div className="prop-row">
+              <label>{t('height')}</label>
+              <input type="number" value={canvasHeight} onChange={(e) => setCanvasSize(canvasWidth, Number(e.target.value))} min={100} />
+            </div>
+            <div className="prop-row">
+              <label>{t('bgColor')}</label>
+              <input type="color" value={backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} />
+            </div>
+          </>
+        )}
       </div>
 
       {hasSelection && (
@@ -152,10 +172,10 @@ export default function PropertyPanel() {
             <div className="prop-section-title">{t('positionSize')}{isCad ? ` (${cadUnit})` : ''}</div>
             {isCad ? (
               <>
-                <div className="prop-row"><label>{t('x')}</label><input type="number" value={Number(formatReal(pxToReal(props.left, scaleRatio, cadUnit), cadUnit))} onChange={(e) => updateProp('left', realToPx(Number(e.target.value), scaleRatio, cadUnit))} onBlur={commitChange} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
-                <div className="prop-row"><label>{t('y')}</label><input type="number" value={Number(formatReal(pxToReal(props.top, scaleRatio, cadUnit), cadUnit))} onChange={(e) => updateProp('top', realToPx(Number(e.target.value), scaleRatio, cadUnit))} onBlur={commitChange} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
-                <div className="prop-row"><label>{t('width')}</label><input type="number" value={Number(formatReal(pxToReal(props.width, scaleRatio, cadUnit), cadUnit))} onChange={(e) => updateProp('width', realToPx(Number(e.target.value), scaleRatio, cadUnit))} onBlur={commitChange} min={0} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
-                <div className="prop-row"><label>{t('height')}</label><input type="number" value={Number(formatReal(pxToReal(props.height, scaleRatio, cadUnit), cadUnit))} onChange={(e) => updateProp('height', realToPx(Number(e.target.value), scaleRatio, cadUnit))} onBlur={commitChange} min={0} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
+                <div className="prop-row"><label>{t('x')}</label><input type="number" value={Number(formatReal(mmToUnit(props.left, cadUnit), cadUnit))} onChange={(e) => updateProp('left', unitToMm(Number(e.target.value), cadUnit))} onBlur={commitChange} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
+                <div className="prop-row"><label>{t('y')}</label><input type="number" value={Number(formatReal(mmToUnit(props.top, cadUnit), cadUnit))} onChange={(e) => updateProp('top', unitToMm(Number(e.target.value), cadUnit))} onBlur={commitChange} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
+                <div className="prop-row"><label>{t('width')}</label><input type="number" value={Number(formatReal(mmToUnit(props.width, cadUnit), cadUnit))} onChange={(e) => updateProp('width', unitToMm(Number(e.target.value), cadUnit))} onBlur={commitChange} min={0} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
+                <div className="prop-row"><label>{t('height')}</label><input type="number" value={Number(formatReal(mmToUnit(props.height, cadUnit), cadUnit))} onChange={(e) => updateProp('height', unitToMm(Number(e.target.value), cadUnit))} onBlur={commitChange} min={0} step={cadUnit === 'mm' ? 1 : cadUnit === 'cm' ? 0.1 : 0.001} /></div>
                 <div className="prop-row"><label>{t('rotation')}</label><input type="number" value={props.angle} onChange={(e) => updateProp('angle', Number(e.target.value))} onBlur={commitChange} /></div>
               </>
             ) : (

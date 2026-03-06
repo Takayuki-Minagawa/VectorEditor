@@ -30,9 +30,16 @@ function App() {
     restoredRef.current = true;
     const saved = loadAutoSave();
     if (saved) {
-      const { setCanvasSize, setBackgroundColor, pushHistory } = useEditorStore.getState();
+      const { setCanvasSize, setBackgroundColor, pushHistory, setDrawingMode, setCadUnit, setScale, setCadSize } = useEditorStore.getState();
       setCanvasSize(saved.canvas.width, saved.canvas.height);
       setBackgroundColor(saved.canvas.backgroundColor);
+      // Restore CAD settings if present
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = saved as any;
+      if (s.drawingMode) setDrawingMode(s.drawingMode);
+      if (s.cadUnit) setCadUnit(s.cadUnit);
+      if (s.scale) setScale(s.scale);
+      if (s.cadWidth && s.cadHeight) setCadSize(s.cadWidth, s.cadHeight);
       const json = JSON.parse(saved.objects);
       canvas.loadFromJSON(json).then(() => {
         canvas.requestRenderAll();

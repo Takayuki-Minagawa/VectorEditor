@@ -96,6 +96,39 @@ export function formatReal(value: number, unit: CadUnit): string {
   }
 }
 
+/** Convert mm value to display unit */
+export function mmToUnit(mm: number, unit: CadUnit): number {
+  switch (unit) {
+    case 'mm': return mm;
+    case 'cm': return mm / 10;
+    case 'm': return mm / 1000;
+  }
+}
+
+/** Convert display unit value back to mm */
+export function unitToMm(value: number, unit: CadUnit): number {
+  switch (unit) {
+    case 'mm': return value;
+    case 'cm': return value * 10;
+    case 'm': return value * 1000;
+  }
+}
+
+/** Paper size definition in mm */
+export interface PaperSize {
+  label: string;
+  width: number;  // mm
+  height: number; // mm
+}
+
+export const PAPER_SIZES: PaperSize[] = [
+  { label: 'A0', width: 841, height: 1189 },
+  { label: 'A1', width: 594, height: 841 },
+  { label: 'A2', width: 420, height: 594 },
+  { label: 'A3', width: 297, height: 420 },
+  { label: 'A4', width: 210, height: 297 },
+];
+
 export interface DocumentData {
   documentId: string;
   canvas: {
@@ -109,4 +142,6 @@ export interface DocumentData {
   drawingMode?: DrawingMode;
   cadUnit?: CadUnit;
   scale?: string;
+  cadWidth?: number;   // CAD drawing width in mm (1:1 mode)
+  cadHeight?: number;  // CAD drawing height in mm (1:1 mode)
 }

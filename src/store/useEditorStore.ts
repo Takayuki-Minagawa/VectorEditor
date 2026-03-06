@@ -38,6 +38,11 @@ interface EditorStore {
   scale: string;
   setScale: (scale: string) => void;
 
+  // CAD document size (mm, 1:1 mode)
+  cadWidth: number;
+  cadHeight: number;
+  setCadSize: (w: number, h: number) => void;
+
   // Selection tracking
   selectedObjectIds: string[];
   setSelectedObjectIds: (ids: string[]) => void;
@@ -106,14 +111,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   zoom: 1,
-  setZoom: (zoom) => {
-    const { canvas } = get();
-    if (canvas) {
-      canvas.setZoom(zoom);
-      canvas.requestRenderAll();
-    }
-    set({ zoom });
-  },
+  setZoom: (zoom) => set({ zoom }),
 
   gridVisible: false,
   toggleGrid: () => set((s) => ({ gridVisible: !s.gridVisible })),
@@ -124,6 +122,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   scale: '1:1',
   setScale: (scale) => set({ scale }),
+
+  cadWidth: 10000,   // 10m default
+  cadHeight: 8000,   // 8m default
+  setCadSize: (w, h) => set({ cadWidth: w, cadHeight: h }),
 
   selectedObjectIds: [],
   setSelectedObjectIds: (ids) => set({ selectedObjectIds: ids }),
