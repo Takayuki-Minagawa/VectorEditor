@@ -56,6 +56,20 @@ interface EditorStore {
   redo: () => void;
   _skipHistoryPush: boolean;
 
+  // Smart guides (object-to-object snap)
+  snapToObjects: boolean;
+  toggleSnapToObjects: () => void;
+
+  // Rulers & Guides
+  showRulers: boolean;
+  toggleRulers: () => void;
+  guides: { orientation: 'h' | 'v'; position: number }[];
+  addGuide: (orientation: 'h' | 'v', position: number) => void;
+  removeGuide: (index: number) => void;
+  clearGuides: () => void;
+  snapToGuides: boolean;
+  toggleSnapToGuides: () => void;
+
   // Clipboard
   clipboard: fabric.FabricObject[] | null;
   setClipboard: (objects: fabric.FabricObject[] | null) => void;
@@ -165,6 +179,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       set({ _skipHistoryPush: false });
     });
   },
+
+  snapToObjects: false,
+  toggleSnapToObjects: () => set((s) => ({ snapToObjects: !s.snapToObjects })),
+
+  showRulers: false,
+  toggleRulers: () => set((s) => ({ showRulers: !s.showRulers })),
+  guides: [],
+  addGuide: (orientation, position) =>
+    set((s) => ({ guides: [...s.guides, { orientation, position }] })),
+  removeGuide: (index) =>
+    set((s) => ({ guides: s.guides.filter((_, i) => i !== index) })),
+  clearGuides: () => set({ guides: [] }),
+  snapToGuides: false,
+  toggleSnapToGuides: () => set((s) => ({ snapToGuides: !s.snapToGuides })),
 
   clipboard: null,
   setClipboard: (objects) => set({ clipboard: objects }),

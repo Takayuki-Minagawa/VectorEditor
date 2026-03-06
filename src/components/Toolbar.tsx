@@ -9,6 +9,7 @@ import CadExportDialog from './CadExportDialog';
 
 export default function Toolbar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [showNumericMove, setShowNumericMove] = useState(false);
   const [showCadExport, setShowCadExport] = useState(false);
   const canvas = useEditorStore((s) => s.canvas);
@@ -82,6 +83,68 @@ export default function Toolbar() {
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleImport = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !canvas) return;
+    const reader = new FileReader();
+    const isSvg = file.type === 'image/svg+xml' || file.name.endsWith('.svg');
+
+    reader.onload = (ev) => {
+      try {
+        const result = ev.target?.result as string;
+        if (isSvg) {
+          // Import SVG as editable objects
+          fabric.loadSVGFromString(result).then((loaded) => {
+            const objects = loaded.objects.filter(Boolean) as fabric.FabricObject[];
+            if (objects.length === 0) return;
+            let obj: fabric.FabricObject;
+            if (objects.length === 1) {
+              obj = objects[0];
+            } else {
+              obj = new fabric.Group(objects);
+            }
+            ensureObjectIdsRecursive(obj);
+            canvas.add(obj);
+            canvas.setActiveObject(obj);
+            canvas.requestRenderAll();
+            pushHistory();
+          });
+        } else {
+          // Import raster image
+          fabric.Image.fromURL(result).then((img) => {
+            ensureObjectIdsRecursive(img);
+            // Scale down if larger than canvas
+            const maxW = canvas.width || 800;
+            const maxH = canvas.height || 600;
+            const imgW = img.width || 100;
+            const imgH = img.height || 100;
+            const scale = Math.min(1, maxW * 0.8 / imgW, maxH * 0.8 / imgH);
+            if (scale < 1) {
+              img.set({ scaleX: scale, scaleY: scale });
+            }
+            canvas.add(img);
+            canvas.setActiveObject(img);
+            canvas.requestRenderAll();
+            pushHistory();
+          });
+        }
+      } catch {
+        alert(t('importError'));
+      }
+    };
+
+    if (isSvg) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsDataURL(file);
+    }
     e.target.value = '';
   };
 
@@ -258,7 +321,9 @@ export default function Toolbar() {
         <span className="toolbar-group-label">{t('file')}</span>
         <button className="toolbar-btn" onClick={handleSaveJSON} title={t('tip_save')}>{t('save')}</button>
         <button className="toolbar-btn" onClick={handleLoadJSON} title={t('tip_load')}>{t('load')}</button>
+        <button className="toolbar-btn" onClick={handleImport} title={t('tip_import')}>{t('import')}</button>
         <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileChange} />
+        <input ref={importInputRef} type="file" accept=".svg,.png,.jpg,.jpeg,.gif,.webp" style={{ display: 'none' }} onChange={handleImportFileChange} />
       </div>
 
       <div className="toolbar-separator" />

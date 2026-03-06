@@ -10,6 +10,7 @@ import {
   reassignObjectIdsRecursive,
 } from '../utils/objectIds';
 import LatexDialog from './LatexDialog';
+import Ruler, { RulerCorner } from './Rulers';
 
 interface MeasureResult {
   x: number;
@@ -119,7 +120,11 @@ export default function Canvas() {
   const drawingMode = useEditorStore((s) => s.drawingMode);
   const cadWidth = useEditorStore((s) => s.cadWidth);
   const cadHeight = useEditorStore((s) => s.cadHeight);
+  const showRulers = useEditorStore((s) => s.showRulers);
   const t = useI18n((s) => s.t);
+
+  // Smart guide lines to render (set during object:moving)
+  const smartGuideLines = useRef<{ orientation: 'h' | 'v'; position: number }[]>([]);
   const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
   const [measureCopied, setMeasureCopied] = useState(false);
   const measureShape = useRef<fabric.Rect | null>(null);
@@ -447,6 +452,147 @@ export default function Canvas() {
       canvas.off('object:moving', handleMoving);
     };
   }, [snapToGrid, gridSize]);
+
+  // Smart guides: snap to other objects' edges/centers + guide lines
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+
+    const SNAP_THRESHOLD = 5;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleMoving = (opt: any) => {
+      const target = opt.target as fabric.FabricObject | undefined;
+      if (!target) return;
+
+      const { snapToObjects: doObj, snapToGuides: doGuide, guides: guideList } = useEditorStore.getState();
+      if (!doObj && !doGuide) {
+        smartGuideLines.current = [];
+        return;
+      }
+
+      const bound = target.getBoundingRect();
+      const tLeft = bound.left;
+      const tRight = bound.left + bound.width;
+      const tCenterX = bound.left + bound.width / 2;
+      const tTop = bound.top;
+      const tBottom = bound.top + bound.height;
+      const tCenterY = bound.top + bound.height / 2;
+
+      const newGuides: { orientation: 'h' | 'v'; position: number }[] = [];
+      let snapDx = 0;
+      let snapDy = 0;
+      let snappedX = false;
+      let snappedY = false;
+
+      // Snap to other objects
+      if (doObj) {
+        const objects = canvas.getObjects();
+        for (const obj of objects) {
+          if (obj === target || (target as fabric.ActiveSelection)?.getObjects?.()?.includes(obj)) continue;
+
+          const ob = obj.getBoundingRect();
+          const oLeft = ob.left;
+          const oRight = ob.left + ob.width;
+          const oCenterX = ob.left + ob.width / 2;
+          const oTop = ob.top;
+          const oBottom = ob.top + ob.height;
+          const oCenterY = ob.top + ob.height / 2;
+
+          // Vertical snap lines (X-axis alignment)
+          if (!snappedX) {
+            const xPairs: [number, number][] = [
+              [tLeft, oLeft], [tLeft, oRight], [tLeft, oCenterX],
+              [tRight, oLeft], [tRight, oRight], [tRight, oCenterX],
+              [tCenterX, oCenterX], [tCenterX, oLeft], [tCenterX, oRight],
+            ];
+            for (const [tVal, oVal] of xPairs) {
+              if (Math.abs(tVal - oVal) < SNAP_THRESHOLD) {
+                snapDx = oVal - tVal;
+                newGuides.push({ orientation: 'v', position: oVal });
+                snappedX = true;
+                break;
+              }
+            }
+          }
+
+          // Horizontal snap lines (Y-axis alignment)
+          if (!snappedY) {
+            const yPairs: [number, number][] = [
+              [tTop, oTop], [tTop, oBottom], [tTop, oCenterY],
+              [tBottom, oTop], [tBottom, oBottom], [tBottom, oCenterY],
+              [tCenterY, oCenterY], [tCenterY, oTop], [tCenterY, oBottom],
+            ];
+            for (const [tVal, oVal] of yPairs) {
+              if (Math.abs(tVal - oVal) < SNAP_THRESHOLD) {
+                snapDy = oVal - tVal;
+                newGuides.push({ orientation: 'h', position: oVal });
+                snappedY = true;
+                break;
+              }
+            }
+          }
+
+          if (snappedX && snappedY) break;
+        }
+      }
+
+      // Snap to guide lines
+      if (doGuide && guideList.length > 0) {
+        for (const g of guideList) {
+          if (g.orientation === 'v' && !snappedX) {
+            const xEdges = [tLeft, tRight, tCenterX];
+            for (const edge of xEdges) {
+              if (Math.abs(edge - g.position) < SNAP_THRESHOLD) {
+                snapDx = g.position - edge;
+                snappedX = true;
+                break;
+              }
+            }
+          }
+          if (g.orientation === 'h' && !snappedY) {
+            const yEdges = [tTop, tBottom, tCenterY];
+            for (const edge of yEdges) {
+              if (Math.abs(edge - g.position) < SNAP_THRESHOLD) {
+                snapDy = g.position - edge;
+                snappedY = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Apply snap offset
+      if (snapDx !== 0 || snapDy !== 0) {
+        target.set({
+          left: (target.left || 0) + snapDx,
+          top: (target.top || 0) + snapDy,
+        });
+        target.setCoords();
+      }
+
+      smartGuideLines.current = newGuides;
+      canvas.requestRenderAll();
+    };
+
+    const handleMoveEnd = () => {
+      if (smartGuideLines.current.length > 0) {
+        smartGuideLines.current = [];
+        canvas.requestRenderAll();
+      }
+    };
+
+    canvas.on('object:moving', handleMoving);
+    canvas.on('object:modified', handleMoveEnd);
+    canvas.on('selection:cleared', handleMoveEnd);
+
+    return () => {
+      canvas.off('object:moving', handleMoving);
+      canvas.off('object:modified', handleMoveEnd);
+      canvas.off('selection:cleared', handleMoveEnd);
+    };
+  }, []);
 
   // Drawing logic
   useEffect(() => {
@@ -972,6 +1118,74 @@ export default function Canvas() {
     };
   }, [drawingMode, gridVisible, gridSize]);
 
+  // Render smart guide lines and stored guide lines via after:render
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+
+    const handler = () => {
+      const ctx = canvas.getContext();
+      const vpt = canvas.viewportTransform;
+      const isCad = useEditorStore.getState().drawingMode === 'cad';
+      const z = isCad ? canvas.getZoom() : 1;
+      const panX = isCad && vpt ? vpt[4] : 0;
+      const panY = isCad && vpt ? vpt[5] : 0;
+      const w = canvas.width || 0;
+      const h = canvas.height || 0;
+
+      // Draw stored guide lines
+      const guideList = useEditorStore.getState().guides;
+      if (guideList.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = '#00bcd4';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        for (const g of guideList) {
+          ctx.beginPath();
+          if (g.orientation === 'h') {
+            const sy = g.position * z + panY;
+            ctx.moveTo(0, sy);
+            ctx.lineTo(w, sy);
+          } else {
+            const sx = g.position * z + panX;
+            ctx.moveTo(sx, 0);
+            ctx.lineTo(sx, h);
+          }
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      // Draw smart guide lines (temporary, during move)
+      const lines = smartGuideLines.current;
+      if (lines.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = '#ff4081';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        for (const line of lines) {
+          ctx.beginPath();
+          if (line.orientation === 'h') {
+            const sy = line.position * z + panY;
+            ctx.moveTo(0, sy);
+            ctx.lineTo(w, sy);
+          } else {
+            const sx = line.position * z + panX;
+            ctx.moveTo(sx, 0);
+            ctx.lineTo(sx, h);
+          }
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    };
+
+    canvas.on('after:render', handler);
+    return () => { canvas.off('after:render', handler); };
+  }, []);
+
   // Draw grid overlay (illustration mode only)
   const renderGrid = () => {
     if (!gridVisible || drawingMode === 'cad') return null;
@@ -1166,6 +1380,13 @@ export default function Canvas() {
 
   return (
     <div className={`canvas-wrapper ${isCadMode ? 'cad-mode' : ''}`} ref={wrapperRef}>
+      {showRulers && (
+        <>
+          <RulerCorner />
+          <Ruler orientation="h" canvasEl={wrapperRef.current} />
+          <Ruler orientation="v" canvasEl={wrapperRef.current} />
+        </>
+      )}
       <div
         className="canvas-container"
         style={isCadMode ? {

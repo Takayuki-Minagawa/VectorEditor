@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useI18n } from '../i18n/useI18n';
 import type { TranslationKeys } from '../i18n/ja';
 
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.0.3';
 
 interface Section {
   titleKey: TranslationKeys;
@@ -16,6 +16,7 @@ const sections: Section[] = [
   { titleKey: 'help_file_title', bodyKey: 'help_file_body' },
   { titleKey: 'help_layer_title', bodyKey: 'help_layer_body' },
   { titleKey: 'help_cad_title', bodyKey: 'help_cad_body' },
+  { titleKey: 'help_guides_title', bodyKey: 'help_guides_body' },
   { titleKey: 'help_shortcut_title', bodyKey: 'help_shortcut_body' },
 ];
 

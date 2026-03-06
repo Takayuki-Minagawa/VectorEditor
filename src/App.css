@@ -1024,6 +1024,13 @@
   color: #888 !important;
 }
 
+/* ===== Rulers ===== */
+.ruler {
+  user-select: none;
+  overflow: hidden;
+  background: #f8f8f8;
+}
+
 /* ===== Fabric.js overrides ===== */
 .upper-canvas {
   cursor: inherit !important;
