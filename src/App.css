@@ -228,6 +228,11 @@
   margin-bottom: 4px;
 }
 
+.preset-select {
+  flex: 1;
+  width: 0;
+}
+
 .prop-row label {
   width: 40px;
   min-width: 40px;

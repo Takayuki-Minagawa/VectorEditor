@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
+import { CANVAS_PRESETS } from '../types';
+import type { TranslationKeys } from '../i18n/ja';
 
 interface ObjProps {
   left: number; top: number; width: number; height: number; angle: number;
@@ -97,6 +99,34 @@ export default function PropertyPanel() {
     <div className="property-panel">
       <div className="prop-section">
         <div className="prop-section-title">{t('canvas')}</div>
+        <div className="prop-row">
+          <label>{t('presetSize')}</label>
+          <select
+            className="preset-select"
+            value={
+              CANVAS_PRESETS.find((p) => p.width === canvasWidth && p.height === canvasHeight)?.labelKey
+              || 'preset_custom'
+            }
+            onChange={(e) => {
+              const preset = CANVAS_PRESETS.find((p) => p.labelKey === e.target.value);
+              if (preset && preset.width > 0) setCanvasSize(preset.width, preset.height);
+            }}
+          >
+            {(['doc', 'slide', 'web', 'common', 'custom'] as const).map((cat) => {
+              const catKey = `preset_cat_${cat}` as TranslationKeys;
+              const items = CANVAS_PRESETS.filter((p) => p.category === cat);
+              return (
+                <optgroup key={cat} label={t(catKey)}>
+                  {items.map((p) => (
+                    <option key={p.labelKey} value={p.labelKey}>
+                      {t(p.labelKey as TranslationKeys)}{p.width > 0 ? ` (${p.width}x${p.height})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
+          </select>
+        </div>
         <div className="prop-row">
           <label>{t('width')}</label>
           <input type="number" value={canvasWidth} onChange={(e) => setCanvasSize(Number(e.target.value), canvasHeight)} min={100} />
