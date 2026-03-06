@@ -48,6 +48,7 @@ const ja = {
   grid: 'グリッド',
   svg: 'SVG',
   png: 'PNG',
+  pdf: 'PDF',
 
   // Toolbar tooltips
   tip_save: 'JSON保存',
@@ -71,6 +72,7 @@ const ja = {
   tip_distributeV: '縦均等配置',
   tip_svg: 'SVG書き出し',
   tip_png: 'PNG書き出し',
+  tip_pdf: 'PDF書き出し',
 
   // Property panel
   canvas: 'キャンバス',
@@ -171,7 +173,7 @@ const ja = {
   help_edit_title: '選択と編集',
   help_edit_body: '・8方向のサイズハンドルでリサイズ\n・上部の回転ハンドルで回転（Shift押下で15度刻み）\n・矢印キーで1px移動（Shift+矢印で10px）\n・Alt+ドラッグでオブジェクトを複製移動\n・右パネルで位置・サイズ・色・線・透明度を数値指定\n・複数選択して整列・均等配置が可能',
   help_file_title: 'ファイル操作',
-  help_file_body: '・保存: JSON形式でダウンロード（再編集可能）\n・読込: 保存したJSONファイルを開く\n・自動保存: 10秒ごとにブラウザに自動保存、次回起動時に復元\n・SVG書き出し: ベクター形式で出力\n・PNG書き出し: 2倍解像度の画像で出力',
+  help_file_body: '・保存: JSON形式でダウンロード（再編集可能）\n・読込: 保存したJSONファイルを開く\n・自動保存: 10秒ごとにブラウザに自動保存、次回起動時に復元\n・SVG書き出し: ベクター形式で出力\n・PNG書き出し: 2倍解像度の画像で出力\n・PDF書き出し: ベクター品質のPDFとして出力',
   help_layer_title: 'レイヤーと配置',
   help_layer_body: '・右パネル下部のレイヤー一覧でオブジェクトを管理\n・目のアイコンで表示/非表示を切替\n・鍵アイコンでロック/解除\n・ツールバーの「配置」で重なり順を変更\n・Ctrl+Gでグループ化、Ctrl+Shift+Gで解除',
   help_shortcut_title: 'ショートカット',

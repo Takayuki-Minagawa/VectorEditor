@@ -46,6 +46,7 @@ const en: Record<TranslationKeys, string> = {
   grid: 'Grid',
   svg: 'SVG',
   png: 'PNG',
+  pdf: 'PDF',
 
   tip_save: 'Save as JSON',
   tip_load: 'Load JSON',
@@ -68,6 +69,7 @@ const en: Record<TranslationKeys, string> = {
   tip_distributeV: 'Distribute Vertically',
   tip_svg: 'Export as SVG',
   tip_png: 'Export as PNG',
+  tip_pdf: 'Export as PDF',
 
   canvas: 'Canvas',
   width: 'W',
@@ -162,7 +164,7 @@ const en: Record<TranslationKeys, string> = {
   help_edit_title: 'Selection & Editing',
   help_edit_body: '- 8-direction resize handles for scaling\n- Top rotation handle to rotate (hold Shift for 15-degree snap)\n- Arrow keys to move 1px (Shift+Arrow for 10px)\n- Alt+Drag to clone and move objects\n- Right panel for numeric input of position, size, color, stroke, opacity\n- Select multiple objects for alignment and even distribution',
   help_file_title: 'File Operations',
-  help_file_body: '- Save: Download as JSON (re-editable)\n- Load: Open a saved JSON file\n- Auto-save: Saves to browser every 10 seconds, restores on next visit\n- SVG Export: Vector format output\n- PNG Export: 2x resolution image output',
+  help_file_body: '- Save: Download as JSON (re-editable)\n- Load: Open a saved JSON file\n- Auto-save: Saves to browser every 10 seconds, restores on next visit\n- SVG Export: Vector format output\n- PNG Export: 2x resolution image output\n- PDF Export: Vector-quality PDF output',
   help_layer_title: 'Layers & Arrangement',
   help_layer_body: '- Manage objects in the layer list at the bottom of the right panel\n- Eye icon to toggle visibility\n- Lock icon to toggle lock\n- Use toolbar "Arrange" to change z-order\n- Ctrl+G to group, Ctrl+Shift+G to ungroup',
   help_shortcut_title: 'Shortcuts',

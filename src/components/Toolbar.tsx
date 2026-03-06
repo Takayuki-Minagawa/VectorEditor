@@ -87,6 +87,30 @@ export default function Toolbar() {
     a.click();
   };
 
+  const handleExportPDF = async () => {
+    if (!canvas) return;
+    const { jsPDF } = await import('jspdf');
+    await import('svg2pdf.js');
+
+    const svgStr = canvas.toSVG();
+    const parser = new DOMParser();
+    const svgDoc = parser.parseFromString(svgStr, 'image/svg+xml');
+    const svgEl = svgDoc.documentElement;
+
+    const w = canvasWidth;
+    const h = canvasHeight;
+    const orientation = w >= h ? 'landscape' : 'portrait';
+    const pdf = new jsPDF({
+      orientation,
+      unit: 'px',
+      format: [w, h],
+      hotfixes: ['px_scaling'],
+    });
+
+    await pdf.svg(svgEl, { x: 0, y: 0, width: w, height: h });
+    pdf.save('vector-drawing.pdf');
+  };
+
   const handleDeleteSelected = () => {
     if (!canvas) return;
     const active = canvas.getActiveObjects();
@@ -262,6 +286,7 @@ export default function Toolbar() {
         <span className="toolbar-group-label">{t('export')}</span>
         <button className="toolbar-btn" onClick={handleExportSVG} title={t('tip_svg')}>{t('svg')}</button>
         <button className="toolbar-btn" onClick={handleExportPNG} title={t('tip_png')}>{t('png')}</button>
+        <button className="toolbar-btn" onClick={handleExportPDF} title={t('tip_pdf')}>{t('pdf')}</button>
       </div>
     </div>
   );

@@ -16,7 +16,7 @@ A browser-based vector illustration editor for creating diagrams and illustratio
 - **Keyboard Shortcuts** &mdash; Standard shortcuts for all major operations (Windows & macOS)
 - **Context Menu** &mdash; Right-click for quick access to common actions
 - **Save & Load** &mdash; JSON-based project files for full re-editing; auto-save to localStorage
-- **Export** &mdash; SVG (vector) and PNG (2x resolution) export
+- **Export** &mdash; SVG (vector), PNG (2x resolution), and PDF (vector-quality) export
 - **Grid Display** &mdash; Toggle grid overlay for precise placement
 - **Bilingual UI** &mdash; Japanese (default) and English, switchable with a button
 
@@ -59,6 +59,8 @@ This project is configured for GitHub Pages deployment. Set the repository name 
 | [TypeScript](https://www.typescriptlang.org/) | 5.9 | Apache-2.0 | Type safety |
 | [Fabric.js](http://fabricjs.com/) | 7 | MIT | Canvas rendering and object manipulation |
 | [Zustand](https://zustand-demo.pmnd.rs/) | 5 | MIT | State management |
+| [jsPDF](https://github.com/parallax/jsPDF) | 4 | MIT | PDF export |
+| [svg2pdf.js](https://github.com/yWorks/svg2pdf.js) | 2 | MIT | SVG to PDF conversion |
 | [Vite](https://vite.dev/) | 7 | MIT | Build tool and dev server |
 
 All runtime dependencies use permissive open-source licenses (MIT, Apache-2.0).
@@ -101,5 +103,7 @@ This software uses the following open-source libraries. See each project for det
 - **Fabric.js** &mdash; MIT License &mdash; Copyright Fabric.js contributors
 - **React** &mdash; MIT License &mdash; Copyright Meta Platforms, Inc.
 - **Zustand** &mdash; MIT License &mdash; Copyright pmndrs contributors
+- **jsPDF** &mdash; MIT License &mdash; Copyright James Hall and yWorks GmbH
+- **svg2pdf.js** &mdash; MIT License &mdash; Copyright yWorks GmbH
 - **Vite** &mdash; MIT License &mdash; Copyright Evan You and Vite contributors
 - **TypeScript** &mdash; Apache License 2.0 &mdash; Copyright Microsoft Corporation
