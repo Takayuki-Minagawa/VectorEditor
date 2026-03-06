@@ -26,9 +26,22 @@ export default function LayerPanel() {
         const text = (obj as fabric.Textbox).text || '';
         label = `T: ${text.slice(0, 12)}${text.length > 12 ? '...' : ''}`;
       } else if (obj instanceof fabric.Group) {
-        label = `${t('layerGroup')} (${(obj as fabric.Group).getObjects().length})`;
+        const items = (obj as fabric.Group).getObjects();
+        // Detect dimension line (group with line + ticks + text)
+        const hasText = items.some((it) => it instanceof fabric.Text);
+        const lineCount = items.filter((it) => it instanceof fabric.Line).length;
+        if (hasText && lineCount >= 2) {
+          label = t('layerDimension');
+        } else {
+          label = `${t('layerGroup')} (${items.length})`;
+        }
       } else if (obj instanceof fabric.Line) { label = t('layerLine');
-      } else if (obj instanceof fabric.Rect) { label = t('layerRect');
+      } else if (obj instanceof fabric.Rect) {
+        // Detect wall/column by id prefix or fill color
+        const objId = (obj as fabric.FabricObject & { id?: string }).id || '';
+        if (objId.startsWith('wall_')) label = t('layerWall');
+        else if (objId.startsWith('column_')) label = t('layerColumn');
+        else label = t('layerRect');
       } else if (obj instanceof fabric.Circle) { label = t('layerCircle');
       } else if (obj instanceof fabric.Ellipse) { label = t('layerEllipse');
       } else if (obj instanceof fabric.Triangle) { label = t('layerTriangle');

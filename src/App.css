@@ -135,12 +135,49 @@
   overflow-y: auto;
 }
 
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 2px;
+}
+
+.panel-title-row .panel-title {
+  padding: 0;
+}
+
 .panel-title {
   font-size: 10px;
   color: #888;
   text-align: center;
   padding: 4px 0;
   user-select: none;
+}
+
+.tool-settings-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: #888;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.tool-settings-btn:hover {
+  background: #e0e0e0;
+  color: #333;
+}
+
+.tool-separator {
+  height: 1px;
+  background: #d0d0d0;
+  margin: 3px 2px;
 }
 
 .tool-btn {
@@ -699,6 +736,93 @@
   font-size: 11px;
   color: #999;
   text-align: right;
+}
+
+/* ===== Tool Settings Dialog ===== */
+.tool-settings-category {
+  margin-bottom: 10px;
+}
+
+.tool-settings-cat-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 0;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 4px;
+}
+
+.tool-settings-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding-left: 8px;
+}
+
+.tool-settings-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 110px;
+}
+
+.tool-settings-item:hover {
+  background: #f0f4ff;
+}
+
+/* ===== Status Bar extras ===== */
+.status-inline-label {
+  font-size: 10px;
+  color: #999;
+  user-select: none;
+}
+
+.status-select {
+  padding: 1px 3px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 11px;
+  background: #fff;
+  height: 22px;
+}
+
+.status-input {
+  width: 42px;
+  padding: 1px 3px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 11px;
+  text-align: center;
+  height: 22px;
+}
+
+.status-snap-btn {
+  padding: 2px 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 10px;
+  color: #555;
+  height: 22px;
+  transition: background 0.15s;
+}
+
+.status-snap-btn:hover {
+  background: #e8e8e8;
+}
+
+.status-snap-btn.active {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  font-weight: 600;
 }
 
 /* ===== Measure Popup ===== */

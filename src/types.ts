@@ -11,7 +11,10 @@ export type ToolType =
   | 'polygon'
   | 'polyline'
   | 'text'
-  | 'measure';
+  | 'measure'
+  | 'dimension'
+  | 'wall'
+  | 'column';
 
 export interface CanvasPreset {
   labelKey: string;

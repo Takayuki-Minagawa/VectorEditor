@@ -17,6 +17,9 @@ const en: Record<TranslationKeys, string> = {
   tool_polyline: 'Polyline',
   tool_text: 'Text',
   tool_measure: 'LaTeX Measure',
+  tool_dimension: 'Dimension',
+  tool_wall: 'Wall',
+  tool_column: 'Column',
 
   file: 'File',
   edit: 'Edit',
@@ -161,7 +164,7 @@ const en: Record<TranslationKeys, string> = {
   help_overview_title: 'Overview',
   help_overview_body: 'This is a browser-based vector illustration editor. Create and edit shapes and illustrations for documents, manuals, proposals, and educational materials with an intuitive interface.',
   help_tools_title: 'Shape Tools',
-  help_tools_body: 'Select a tool from the left panel and drag on the canvas to create shapes.\n\n- Select: Click or drag to select objects\n- Line / Arrow: Drag from start to end point\n- Rect / Rounded / Circle / Ellipse / Triangle / Diamond: Drag to set size\n- Polygon / Polyline: Click to add vertices, double-click to finish\n- Text: Click to place a text box, double-click to edit\n- LaTeX Measure: Drag a rectangle to display position and size in LaTeX coordinates (bottom-left origin)',
+  help_tools_body: 'Select a tool from the left panel and drag on the canvas to create shapes.\n\n- Select: Click or drag to select objects\n- Line / Arrow: Drag from start to end point\n- Rect / Rounded / Circle / Ellipse / Triangle / Diamond: Drag to set size\n- Polygon / Polyline: Click to add vertices, double-click to finish\n- Text: Click to place a text box, double-click to edit\n- LaTeX Measure: Drag a rectangle to display position and size in LaTeX coordinates (bottom-left origin)\n\n[Architecture Tools]\n- Dimension: Drag to create a dimension line (auto-displays distance)\n- Wall: Drag to draw a wall segment (filled rectangle)\n- Column: Click to place a column (grid-sized square)',
   help_edit_title: 'Selection & Editing',
   help_edit_body: '- 8-direction resize handles for scaling\n- Top rotation handle to rotate (hold Shift for 15-degree snap)\n- Arrow keys to move 1px (Shift+Arrow for 10px)\n- Alt+Drag to clone and move objects\n- Right panel for numeric input of position, size, color, stroke, opacity\n- Select multiple objects for alignment and even distribution',
   help_file_title: 'File Operations',
@@ -194,6 +197,23 @@ const en: Record<TranslationKeys, string> = {
   preset_sq_medium: 'Square Medium',
   preset_sq_large: 'Square Large',
   preset_custom: 'Custom',
+
+  cat_basic: 'Basic',
+  cat_shapes: 'Shapes',
+  cat_arch: 'Architecture',
+  cat_utility: 'Utility',
+  toolSettings: 'Tool Settings',
+  toolSettingsDesc: 'Select tools to display',
+
+  snapToGrid: 'Snap',
+  gridSize: 'Grid',
+  snapOn: 'Snap ON',
+
+  scale: 'Scale',
+
+  layerDimension: 'Dimension',
+  layerWall: 'Wall',
+  layerColumn: 'Column',
 
   measureResult: 'LaTeX Coordinates',
   measureX: 'X (from bottom-left)',

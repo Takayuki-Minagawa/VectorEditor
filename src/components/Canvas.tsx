@@ -16,6 +16,10 @@ function generateId(type: string): string {
   return `${type}_${++objectCounter}_${Date.now()}`;
 }
 
+function snapVal(v: number, gridSize: number): number {
+  return Math.round(v / gridSize) * gridSize;
+}
+
 export default function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -39,10 +43,17 @@ export default function Canvas() {
 
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
+  const gridSize = useEditorStore((s) => s.gridSize);
+  const snapToGrid = useEditorStore((s) => s.snapToGrid);
   const t = useI18n((s) => s.t);
   const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
   const [measureCopied, setMeasureCopied] = useState(false);
   const measureShape = useRef<fabric.Rect | null>(null);
+
+  const snap = useCallback(
+    (v: number) => (snapToGrid ? snapVal(v, gridSize) : v),
+    [snapToGrid, gridSize],
+  );
 
   const applyDefaults = useCallback((obj: fabric.FabricObject, id: string) => {
     obj.set({
@@ -163,6 +174,65 @@ export default function Canvas() {
           obj = new fabric.Group([line, head]);
           break;
         }
+        case 'wall':
+          obj = new fabric.Rect({
+            left,
+            top,
+            width: Math.max(width, 4),
+            height: Math.max(height, 4),
+            fill: '#555555',
+            stroke: '#333333',
+            strokeWidth: 1,
+            opacity: 1,
+          });
+          break;
+        case 'dimension': {
+          const dx = endX - startX;
+          const dy = endY - startY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 5) return null;
+
+          const mainLine = new fabric.Line([startX, startY, endX, endY], {
+            stroke: '#333333',
+            strokeWidth: 1,
+            fill: '',
+          });
+
+          // Tick marks perpendicular to the line
+          const ang = Math.atan2(dy, dx);
+          const perpAng = ang + Math.PI / 2;
+          const tickLen = 6;
+          const tick1 = new fabric.Line([
+            startX + tickLen * Math.cos(perpAng),
+            startY + tickLen * Math.sin(perpAng),
+            startX - tickLen * Math.cos(perpAng),
+            startY - tickLen * Math.sin(perpAng),
+          ], { stroke: '#333333', strokeWidth: 1, fill: '' });
+
+          const tick2 = new fabric.Line([
+            endX + tickLen * Math.cos(perpAng),
+            endY + tickLen * Math.sin(perpAng),
+            endX - tickLen * Math.cos(perpAng),
+            endY - tickLen * Math.sin(perpAng),
+          ], { stroke: '#333333', strokeWidth: 1, fill: '' });
+
+          // Label
+          const midX = (startX + endX) / 2;
+          const midY = (startY + endY) / 2;
+          const labelText = Math.round(dist).toString();
+          const label = new fabric.Text(labelText, {
+            left: midX,
+            top: midY - 14,
+            fontSize: 12,
+            fontFamily: 'sans-serif',
+            fill: '#333333',
+            originX: 'center',
+            originY: 'bottom',
+          });
+
+          obj = new fabric.Group([mainLine, tick1, tick2, label]);
+          break;
+        }
         default:
           return null;
       }
@@ -271,6 +341,28 @@ export default function Canvas() {
     };
   }, [setSelectedObjectIds, pushHistory]);
 
+  // Grid snap on object moving
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleMoving = (opt: any) => {
+      if (!snapToGrid || !opt.target) return;
+      const obj = opt.target as fabric.FabricObject;
+      obj.set({
+        left: snapVal(obj.left || 0, gridSize),
+        top: snapVal(obj.top || 0, gridSize),
+      });
+      obj.setCoords();
+    };
+
+    canvas.on('object:moving', handleMoving);
+    return () => {
+      canvas.off('object:moving', handleMoving);
+    };
+  }, [snapToGrid, gridSize]);
+
   // Drawing logic
   useEffect(() => {
     const canvas = fabricRef.current;
@@ -278,13 +370,33 @@ export default function Canvas() {
 
     const handleMouseDown = (opt: fabric.TPointerEventInfo) => {
       if (activeTool === 'select') return;
-      const pointer = canvas.getScenePoint(opt.e);
+      const rawPointer = canvas.getScenePoint(opt.e);
+      const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
 
       // Measure tool: start drawing a temporary rectangle
       if (activeTool === 'measure') {
         isDrawing.current = true;
         drawStart.current = { x: pointer.x, y: pointer.y };
         canvas.selection = false;
+        return;
+      }
+
+      // Column tool: click to place
+      if (activeTool === 'column') {
+        const sz = gridSize > 0 ? gridSize : 20;
+        const id = generateId('column');
+        const col = new fabric.Rect({
+          left: snap(rawPointer.x) - sz / 2,
+          top: snap(rawPointer.y) - sz / 2,
+          width: sz,
+          height: sz,
+          fill: '#333333',
+          stroke: '#111111',
+          strokeWidth: 1,
+        });
+        applyDefaults(col, id);
+        canvas.add(col);
+        finishDrawing(col);
         return;
       }
 
@@ -330,7 +442,8 @@ export default function Canvas() {
 
     const handleMouseMove = (opt: fabric.TPointerEventInfo) => {
       if (!isDrawing.current || activeTool === 'select') return;
-      const pointer = canvas.getScenePoint(opt.e);
+      const rawPointer = canvas.getScenePoint(opt.e);
+      const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
 
       // Measure tool preview
       if (activeTool === 'measure') {
@@ -381,7 +494,8 @@ export default function Canvas() {
     const handleMouseUp = (opt: fabric.TPointerEventInfo) => {
       if (!isDrawing.current || activeTool === 'select') return;
       isDrawing.current = false;
-      const pointer = canvas.getScenePoint(opt.e);
+      const rawPointer = canvas.getScenePoint(opt.e);
+      const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
 
       // Measure tool: calculate LaTeX coordinates and show popup
       if (activeTool === 'measure') {
@@ -476,7 +590,7 @@ export default function Canvas() {
       canvas.off('mouse:up', handleMouseUp);
       canvas.off('mouse:dblclick', handleDblClick);
     };
-  }, [activeTool, applyDefaults, createShapeOnDrag, finishDrawing, setActiveTool, pushHistory, t]);
+  }, [activeTool, applyDefaults, createShapeOnDrag, finishDrawing, setActiveTool, pushHistory, t, snap, gridSize]);
 
   // Zoom handling
   useEffect(() => {
@@ -493,7 +607,7 @@ export default function Canvas() {
   // Draw grid overlay
   const renderGrid = () => {
     if (!gridVisible) return null;
-    const step = 20;
+    const step = gridSize;
     const lines: React.ReactElement[] = [];
     for (let x = 0; x <= canvasWidth; x += step) {
       lines.push(

@@ -23,6 +23,14 @@ interface EditorStore {
   // Grid
   gridVisible: boolean;
   toggleGrid: () => void;
+  gridSize: number;
+  setGridSize: (size: number) => void;
+  snapToGrid: boolean;
+  toggleSnap: () => void;
+
+  // Scale (display label)
+  scale: string;
+  setScale: (scale: string) => void;
 
   // Selection tracking
   selectedObjectIds: string[];
@@ -98,6 +106,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   gridVisible: false,
   toggleGrid: () => set((s) => ({ gridVisible: !s.gridVisible })),
+  gridSize: 20,
+  setGridSize: (size) => set({ gridSize: Math.max(5, size) }),
+  snapToGrid: false,
+  toggleSnap: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
+
+  scale: '1:1',
+  setScale: (scale) => set({ scale }),
 
   selectedObjectIds: [],
   setSelectedObjectIds: (ids) => set({ selectedObjectIds: ids }),
