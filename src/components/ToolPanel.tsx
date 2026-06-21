@@ -17,6 +17,7 @@ const allTools: ToolDef[] = [
   { tool: 'select', labelKey: 'tool_select', icon: '⊹', category: 'basic' },
   { tool: 'line', labelKey: 'tool_line', icon: '╲', category: 'basic' },
   { tool: 'arrow', labelKey: 'tool_arrow', icon: '→', category: 'basic' },
+  { tool: 'pencil', labelKey: 'tool_pencil', icon: '✎', category: 'basic' },
   { tool: 'text', labelKey: 'tool_text', icon: 'T', category: 'basic' },
   { tool: 'rect', labelKey: 'tool_rect', icon: '□', category: 'shapes' },
   { tool: 'roundedRect', labelKey: 'tool_roundedRect', icon: '▢', category: 'shapes' },
@@ -41,7 +42,7 @@ const categories: { key: ToolCategory; labelKey: TranslationKeys }[] = [
   { key: 'utility', labelKey: 'cat_utility' },
 ];
 
-const STORAGE_KEY = 'vectoreditor-visible-tools';
+const STORAGE_KEY = 'vectoreditor-visible-tools-v2';
 const ALL_TOOL_IDS = allTools.map((t) => t.tool);
 
 function loadVisibleTools(): Set<ToolType> {

@@ -23,6 +23,16 @@ function snapVal(v: number, gridSize: number): number {
   return Math.round(v / gridSize) * gridSize;
 }
 
+// Tools whose direction is constrained to horizontal/vertical by ortho mode
+const ORTHO_TOOLS: ToolType[] = ['line', 'arrow', 'dimension', 'wall'];
+
+/** Constrain an end point to a horizontal or vertical line from the start point */
+function applyOrtho(startX: number, startY: number, endX: number, endY: number): { x: number; y: number } {
+  return Math.abs(endX - startX) >= Math.abs(endY - startY)
+    ? { x: endX, y: startY }
+    : { x: startX, y: endY };
+}
+
 function StretchDialog({
   stretchDx, stretchDy, setStretchDx, setStretchDy, onApply, onCancel,
 }: {
@@ -94,6 +104,7 @@ export default function Canvas() {
   const currentShape = useRef<fabric.FabricObject | null>(null);
   const polygonPoints = useRef<{ x: number; y: number }[]>([]);
   const polygonLines = useRef<fabric.Line[]>([]);
+  const lastCursor = useRef<{ x: number; y: number } | null>(null);
 
   // CAD viewport refs
   const isPanning = useRef(false);
@@ -389,6 +400,16 @@ export default function Canvas() {
     // Push history on object modification
     canvas.on('object:modified', () => pushHistory());
 
+    // Freehand pencil: assign id and record history when a stroke is finished
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handlePathCreated = (opt: any) => {
+      const path = opt.path as fabric.FabricObject | undefined;
+      if (!path) return;
+      path.set({ id: generateObjectId('pencil') } as Partial<fabric.FabricObject>);
+      pushHistory();
+    };
+    canvas.on('path:created', handlePathCreated);
+
     // Alt+drag to duplicate
     let altClone: fabric.FabricObject | null = null;
     canvas.on('object:moving', (opt) => {
@@ -427,6 +448,7 @@ export default function Canvas() {
       canvas.off('object:modified');
       canvas.off('object:moving');
       canvas.off('object:rotating');
+      canvas.off('path:created', handlePathCreated);
       canvas.off('mouse:up');
     };
   }, [setSelectedObjectIds, pushHistory]);
@@ -609,7 +631,8 @@ export default function Canvas() {
         return;
       }
 
-      if (activeTool === 'select') return;
+      // Pencil uses Fabric's built-in free-drawing; nothing to do on mouse down
+      if (activeTool === 'select' || activeTool === 'pencil') return;
       const rawPointer = canvas.getScenePoint(opt.e);
       const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
 
@@ -707,9 +730,27 @@ export default function Canvas() {
         return;
       }
 
+      // Track live cursor position for the status bar (all tools).
+      // Only push to the store when the rounded position changes, to avoid
+      // re-rendering the status bar on every sub-pixel mouse move.
+      const cursorPoint = canvas.getScenePoint(opt.e);
+      const rx = Math.round(cursorPoint.x);
+      const ry = Math.round(cursorPoint.y);
+      if (!lastCursor.current || lastCursor.current.x !== rx || lastCursor.current.y !== ry) {
+        lastCursor.current = { x: rx, y: ry };
+        useEditorStore.getState().setCursorPos({ x: cursorPoint.x, y: cursorPoint.y });
+      }
+
       if (!isDrawing.current || activeTool === 'select') return;
       const rawPointer = canvas.getScenePoint(opt.e);
-      const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
+      let pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
+
+      // Ortho / angle constraint for linear tools (toggle or hold Shift)
+      const orthoMove = useEditorStore.getState().orthoMode || (opt.e as MouseEvent).shiftKey;
+      if (orthoMove && ORTHO_TOOLS.includes(activeTool)) {
+        const c = applyOrtho(drawStart.current.x, drawStart.current.y, pointer.x, pointer.y);
+        pointer = { x: c.x, y: c.y };
+      }
 
       // Measure tool preview
       if (activeTool === 'measure') {
@@ -793,7 +834,14 @@ export default function Canvas() {
       if (!isDrawing.current || activeTool === 'select') return;
       isDrawing.current = false;
       const rawPointer = canvas.getScenePoint(opt.e);
-      const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
+      let pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
+
+      // Ortho / angle constraint for linear tools (toggle or hold Shift)
+      const orthoUp = useEditorStore.getState().orthoMode || (opt.e as MouseEvent).shiftKey;
+      if (orthoUp && ORTHO_TOOLS.includes(activeTool)) {
+        const c = applyOrtho(drawStart.current.x, drawStart.current.y, pointer.x, pointer.y);
+        pointer = { x: c.x, y: c.y };
+      }
 
       // Stretch tool: save box and show dialog
       if (activeTool === 'stretch') {
@@ -902,16 +950,23 @@ export default function Canvas() {
       }
     };
 
+    const handleMouseOut = () => {
+      lastCursor.current = null;
+      useEditorStore.getState().setCursorPos(null);
+    };
+
     canvas.on('mouse:down', handleMouseDown);
     canvas.on('mouse:move', handleMouseMove);
     canvas.on('mouse:up', handleMouseUp);
     canvas.on('mouse:dblclick', handleDblClick);
+    canvas.on('mouse:out', handleMouseOut);
 
     return () => {
       canvas.off('mouse:down', handleMouseDown);
       canvas.off('mouse:move', handleMouseMove);
       canvas.off('mouse:up', handleMouseUp);
       canvas.off('mouse:dblclick', handleDblClick);
+      canvas.off('mouse:out', handleMouseOut);
     };
   }, [activeTool, applyDefaults, createShapeOnDrag, finishDrawing, setActiveTool, pushHistory, t, snap, gridSize]);
 

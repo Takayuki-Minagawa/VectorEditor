@@ -73,6 +73,47 @@ interface EditorStore {
   // Clipboard
   clipboard: fabric.FabricObject[] | null;
   setClipboard: (objects: fabric.FabricObject[] | null) => void;
+
+  // Ortho / angle constraint while drawing
+  orthoMode: boolean;
+  toggleOrtho: () => void;
+
+  // Live cursor position (scene coordinates in px)
+  cursorPos: { x: number; y: number } | null;
+  setCursorPos: (pos: { x: number; y: number } | null) => void;
+
+  // Theme
+  theme: Theme;
+  toggleTheme: () => void;
+
+  // Toast notifications
+  toasts: Toast[];
+  showToast: (message: string, type?: ToastType) => void;
+  removeToast: (id: number) => void;
+}
+
+export type Theme = 'light' | 'dark';
+export type ToastType = 'info' | 'success' | 'error';
+export interface Toast {
+  id: number;
+  message: string;
+  type: ToastType;
+}
+
+const THEME_STORAGE_KEY = 'vectoreditor-theme';
+
+function loadTheme(): Theme {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === 'dark' || saved === 'light') return saved;
+  } catch { /* ignore */ }
+  return 'light';
+}
+
+function applyThemeToDom(theme: Theme) {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = theme;
+  }
 }
 
 const MAX_HISTORY = 50;
@@ -87,7 +128,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setActiveTool: (tool) => {
     const { canvas } = get();
     if (canvas) {
-      canvas.isDrawingMode = false;
+      const isPencil = tool === 'pencil';
+      canvas.isDrawingMode = isPencil;
+      if (isPencil) {
+        const brush = new fabric.PencilBrush(canvas);
+        brush.width = 2;
+        brush.color = '#1F4E79';
+        canvas.freeDrawingBrush = brush;
+      }
       canvas.selection = tool === 'select';
       canvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
       canvas.forEachObject((obj) => {
@@ -196,4 +244,31 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   clipboard: null,
   setClipboard: (objects) => set({ clipboard: objects }),
+
+  orthoMode: false,
+  toggleOrtho: () => set((s) => ({ orthoMode: !s.orthoMode })),
+
+  cursorPos: null,
+  setCursorPos: (pos) => set({ cursorPos: pos }),
+
+  theme: loadTheme(),
+  toggleTheme: () => {
+    const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch { /* ignore */ }
+    applyThemeToDom(next);
+    set({ theme: next });
+  },
+
+  toasts: [],
+  showToast: (message, type = 'info') => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    set((s) => ({ toasts: [...s.toasts, { id, message, type }] }));
+    setTimeout(() => {
+      set((s) => ({ toasts: s.toasts.filter((tt) => tt.id !== id) }));
+    }, 3000);
+  },
+  removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((tt) => tt.id !== id) })),
 }));
+
+// Apply persisted theme to the document on load
+applyThemeToDom(useEditorStore.getState().theme);

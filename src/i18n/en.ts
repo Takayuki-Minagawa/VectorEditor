@@ -294,6 +294,34 @@ const en: Record<TranslationKeys, string> = {
   snapToGuides: 'Guide Snap',
   snapToGuidesOn: 'Guide Snap ON',
 
+  // Pencil tool
+  tool_pencil: 'Pen',
+
+  // Flip
+  ctx_flipH: 'Flip Horizontal',
+  ctx_flipV: 'Flip Vertical',
+
+  // Ortho / angle constraint
+  ortho: 'Ortho',
+  orthoOn: 'Ortho ON',
+  tip_ortho: 'Ortho mode: constrain line/arrow/dimension/wall to horizontal or vertical (hold Shift for a temporary toggle)',
+
+  // Theme
+  tip_theme: 'Toggle light / dark theme',
+
+  // Toast messages
+  saveDone: 'Project saved',
+  loadDone: 'Project loaded',
+  exportDone: 'Exported',
+
+  // Auto-save restore
+  restoreTitle: 'Restore previous work',
+  restoreMessage: 'An auto-saved document was found. Restore it?',
+  restoreSavedAt: 'Saved at',
+  restoreConfirm: 'Restore',
+  restoreDiscard: 'Discard & start new',
+  restoreDone: 'Previous work restored',
+
   loadError: 'Failed to load file.',
   defaultText: 'Text',
   language: 'Language',

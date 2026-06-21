@@ -34,6 +34,9 @@ export default function StatusBar() {
   const toggleSnapToGuides = useEditorStore((s) => s.toggleSnapToGuides);
   const clearGuides = useEditorStore((s) => s.clearGuides);
   const guidesCount = useEditorStore((s) => s.guides.length);
+  const orthoMode = useEditorStore((s) => s.orthoMode);
+  const toggleOrtho = useEditorStore((s) => s.toggleOrtho);
+  const cursorPos = useEditorStore((s) => s.cursorPos);
   const t = useI18n((s) => s.t);
 
   const objectCount = canvas ? canvas.getObjects().length : 0;
@@ -45,6 +48,12 @@ export default function StatusBar() {
   const realW = isCad ? formatReal(mmToUnit(cadWidth, cadUnit), cadUnit) : null;
   const realH = isCad ? formatReal(mmToUnit(cadHeight, cadUnit), cadUnit) : null;
   const realGrid = isCad ? formatReal(mmToUnit(gridSize, cadUnit), cadUnit) : null;
+
+  const cursorText = cursorPos
+    ? isCad
+      ? `${formatReal(mmToUnit(cursorPos.x, cadUnit), cadUnit)}, ${formatReal(mmToUnit(cursorPos.y, cadUnit), cadUnit)} ${cadUnit}`
+      : `${Math.round(cursorPos.x)}, ${Math.round(cursorPos.y)} px`
+    : null;
 
   const handleFitView = () => {
     const c = canvas;
@@ -71,6 +80,9 @@ export default function StatusBar() {
         <span>{t('objects')}: {objectCount}</span>
         <span className="status-separator">|</span>
         <span>{t('selection')}: {selectedObjectIds.length}</span>
+        {cursorText && (
+          <><span className="status-separator">|</span><span className="status-cursor">{cursorText}</span></>
+        )}
         {gridVisible && (
           <><span className="status-separator">|</span><span>{t('gridOn')}</span></>
         )}
@@ -82,6 +94,9 @@ export default function StatusBar() {
         )}
         {snapToGuides && guidesCount > 0 && (
           <><span className="status-separator">|</span><span>{t('snapToGuidesOn')}</span></>
+        )}
+        {orthoMode && (
+          <><span className="status-separator">|</span><span>{t('orthoOn')}</span></>
         )}
       </div>
       <div className="status-right">
@@ -161,6 +176,13 @@ export default function StatusBar() {
           title={t('snapToGuides')}
         >
           {t('snapToGuides')}
+        </button>
+        <button
+          className={`status-snap-btn ${orthoMode ? 'active' : ''}`}
+          onClick={toggleOrtho}
+          title={t('tip_ortho')}
+        >
+          {t('ortho')}
         </button>
         {guidesCount > 0 && (
           <button
