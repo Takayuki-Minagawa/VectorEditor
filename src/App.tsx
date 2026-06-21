@@ -29,7 +29,9 @@ function App() {
   const [pendingRestore, setPendingRestore] = useState<AutoSaveData | null>(() => loadAutoSave());
 
   useKeyboardShortcuts();
-  useAutoSave();
+  // Pause auto-save while a restore decision is pending so the existing
+  // snapshot in localStorage isn't overwritten by the blank startup canvas.
+  useAutoSave(pendingRestore !== null);
 
   const applyRestore = (saved: AutoSaveData) => {
     if (!canvas) return;

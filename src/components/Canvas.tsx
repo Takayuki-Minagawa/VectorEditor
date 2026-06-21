@@ -140,6 +140,12 @@ export default function Canvas() {
   const [measureCopied, setMeasureCopied] = useState(false);
   const measureShape = useRef<fabric.Rect | null>(null);
   const [latexPlacement, setLatexPlacement] = useState<{ x: number; y: number } | null>(null);
+  // Wrapper element exposed as state so rulers receive it without reading a ref during render
+  const [wrapperEl, setWrapperEl] = useState<HTMLDivElement | null>(null);
+  const setWrapperRef = useCallback((el: HTMLDivElement | null) => {
+    wrapperRef.current = el;
+    setWrapperEl(el);
+  }, []);
 
   // Stretch tool state
   const stretchPreview = useRef<fabric.Rect | null>(null);
@@ -1434,12 +1440,12 @@ export default function Canvas() {
   const isCadMode = drawingMode === 'cad';
 
   return (
-    <div className={`canvas-wrapper ${isCadMode ? 'cad-mode' : ''}`} ref={wrapperRef}>
+    <div className={`canvas-wrapper ${isCadMode ? 'cad-mode' : ''}`} ref={setWrapperRef}>
       {showRulers && (
         <>
           <RulerCorner />
-          <Ruler orientation="h" canvasEl={wrapperRef.current} />
-          <Ruler orientation="v" canvasEl={wrapperRef.current} />
+          <Ruler orientation="h" canvasEl={wrapperEl} />
+          <Ruler orientation="v" canvasEl={wrapperEl} />
         </>
       )}
       <div

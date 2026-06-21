@@ -16,11 +16,19 @@ export interface AutoSaveData {
   savedAt?: string;
 }
 
-export function useAutoSave() {
+export function useAutoSave(paused = false) {
   const lastSavedSnapshot = useRef<string>('');
+  // Keep the latest `paused` value readable inside the interval without
+  // recreating it on every change.
+  const pausedRef = useRef(paused);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   useEffect(() => {
     const interval = setInterval(() => {
+      // While a restore decision is pending, don't overwrite the saved snapshot.
+      if (pausedRef.current) return;
       const { canvas, canvasWidth, canvasHeight, backgroundColor, drawingMode, cadUnit, scale, cadWidth, cadHeight } = useEditorStore.getState();
       if (!canvas) return;
 
