@@ -27,11 +27,15 @@ function App() {
   // Auto-save restore prompt: read the saved snapshot once at startup and
   // hold it until the user decides whether to restore.
   const [pendingRestore, setPendingRestore] = useState<AutoSaveData | null>(() => loadAutoSave());
+  // True from the moment the user confirms a restore until loadFromJSON()
+  // settles, so async restores (large/image-heavy data) aren't overwritten.
+  const [restoring, setRestoring] = useState(false);
 
   useKeyboardShortcuts();
-  // Pause auto-save while a restore decision is pending so the existing
-  // snapshot in localStorage isn't overwritten by the blank startup canvas.
-  useAutoSave(pendingRestore !== null);
+  // Pause auto-save while a restore decision is pending or an async restore
+  // is in flight so the existing snapshot isn't overwritten by the blank
+  // startup canvas or a half-loaded restore.
+  useAutoSave(pendingRestore !== null || restoring);
 
   const applyRestore = (saved: AutoSaveData) => {
     if (!canvas) return;
@@ -43,6 +47,8 @@ function App() {
     if (saved.scale) setScale(saved.scale);
     if (saved.cadWidth && saved.cadHeight) setCadSize(saved.cadWidth, saved.cadHeight);
 
+    setRestoring(true);
+    setPendingRestore(null);
     try {
       const json = JSON.parse(saved.objects);
       canvas.loadFromJSON(json).then(() => {
@@ -52,11 +58,13 @@ function App() {
         showToast(t('restoreDone'), 'success');
       }).catch(() => {
         clearAutoSave();
+      }).finally(() => {
+        setRestoring(false);
       });
     } catch {
       clearAutoSave();
+      setRestoring(false);
     }
-    setPendingRestore(null);
   };
 
   const discardRestore = () => {
