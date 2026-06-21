@@ -317,6 +317,34 @@ const ja = {
   snapToGuides: 'ガイドスナップ',
   snapToGuidesOn: 'ガイドスナップ ON',
 
+  // Pencil tool
+  tool_pencil: 'ペン',
+
+  // Flip
+  ctx_flipH: '左右反転',
+  ctx_flipV: '上下反転',
+
+  // Ortho / angle constraint
+  ortho: '直交',
+  orthoOn: '直交 ON',
+  tip_ortho: '直交モード: 線・矢印・寸法線・壁を水平/垂直に拘束（Shiftでも一時的に有効）',
+
+  // Theme
+  tip_theme: 'ライト / ダークテーマを切り替え',
+
+  // Toast messages
+  saveDone: 'プロジェクトを保存しました',
+  loadDone: 'プロジェクトを読み込みました',
+  exportDone: 'エクスポートしました',
+
+  // Auto-save restore
+  restoreTitle: '前回の作業を復元',
+  restoreMessage: '自動保存されたデータが見つかりました。復元しますか？',
+  restoreSavedAt: '保存日時',
+  restoreConfirm: '復元する',
+  restoreDiscard: '破棄して新規',
+  restoreDone: '前回の作業を復元しました',
+
   // Misc
   loadError: 'ファイルの読み込みに失敗しました。',
   defaultText: 'テキスト',

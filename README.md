@@ -7,7 +7,7 @@ A browser-based vector illustration editor for creating diagrams and illustratio
 ## Features
 
 ### Shape & Drawing Tools
-- **Basic Tools** &mdash; Line, arrow, text
+- **Basic Tools** &mdash; Line, arrow, text, freehand pen (pencil)
 - **Shape Tools** &mdash; Rectangle, rounded rectangle, circle, ellipse, triangle, diamond, polygon, polyline
 - **Architecture Tools** &mdash; Dimension line (auto-displays distance), wall, column &mdash; for floor plans, beam layouts, and elevation drawings
 - **LaTeX Math** &mdash; Place LaTeX math expressions on the canvas with live preview (powered by KaTeX)
@@ -23,12 +23,14 @@ A browser-based vector illustration editor for creating diagrams and illustratio
 - **Stretch** &mdash; Draw a crossing window and stretch objects by numeric value
 
 ### Editing & Layout
-- **Object Editing** &mdash; Select, move, resize (8-direction handles), rotate, copy, paste, duplicate, and delete
+- **Object Editing** &mdash; Select, move, resize (8-direction handles), rotate, copy, paste, duplicate, flip (horizontal/vertical), and delete
 - **Alignment & Distribution** &mdash; Left / center / right / top / middle / bottom alignment, horizontal and vertical even distribution
 - **Z-Order & Layers** &mdash; Bring to front, send to back, reorder with layer panel including visibility and lock toggles
 - **Grouping** &mdash; Group and ungroup objects for batch operations
 - **Properties** &mdash; Numeric input for position, size, rotation; fill color, stroke color/width/dash, opacity, corner radius, and full text formatting
 - **Grid & Snap** &mdash; Toggle grid overlay with configurable grid size; snap-to-grid for precise placement
+- **Ortho Mode** &mdash; Constrain line, arrow, dimension, and wall drawing to horizontal/vertical (toggle in the status bar, or hold Shift for a temporary constraint)
+- **Live Cursor Coordinates** &mdash; Status bar shows the live cursor position in px (illustration) or real units (CAD)
 - **Smart Guides** &mdash; Enable object snapping to align edges and centers with other objects; pink guide lines appear during snapping
 - **Rulers & Guide Lines** &mdash; Toggle rulers on top/left edges; click ruler to create guide lines; snap objects to guides
 - **Scale Display** &mdash; Selectable scale indicator (1:1 to 1:500)
@@ -36,11 +38,14 @@ A browser-based vector illustration editor for creating diagrams and illustratio
 
 ### File & Export
 - **Save & Load** &mdash; JSON-based project files for full re-editing; auto-save to localStorage with CAD metadata
+- **Restore Prompt** &mdash; On startup, choose whether to restore the auto-saved document or start fresh (no more silent overwrite)
 - **Import** &mdash; Import SVG files as editable objects or raster images (PNG, JPG, GIF, WebP) with auto-scaling
 - **Export** &mdash; SVG (vector), PNG (2x resolution), and PDF (vector-quality) export; CAD mode uses paper+scale export dialog
 - **Undo / Redo** &mdash; Up to 50 history steps
 
 ### UI & Accessibility
+- **Dark Mode** &mdash; Toggle a light/dark theme from the header; preference is saved to localStorage
+- **Toast Notifications** &mdash; Non-blocking feedback for save, load, export, and errors
 - **Tool Visibility Settings** &mdash; Show/hide tools by category (Basic, Shapes, Architecture, Utility) via checkbox dialog
 - **Keyboard Shortcuts** &mdash; Standard shortcuts for all major operations (Windows & macOS)
 - **Context Menu** &mdash; Right-click for quick access to common actions

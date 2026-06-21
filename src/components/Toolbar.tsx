@@ -23,6 +23,7 @@ export default function Toolbar() {
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const gridVisible = useEditorStore((s) => s.gridVisible);
   const toggleGrid = useEditorStore((s) => s.toggleGrid);
+  const showToast = useEditorStore((s) => s.showToast);
   const t = useI18n((s) => s.t);
 
   const drawingMode = useEditorStore((s) => s.drawingMode);
@@ -52,6 +53,7 @@ export default function Toolbar() {
     a.download = 'vector-drawing.json';
     a.click();
     URL.revokeObjectURL(url);
+    showToast(t('saveDone'), 'success');
   };
 
   const handleLoadJSON = () => {
@@ -77,9 +79,10 @@ export default function Toolbar() {
           canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
           canvas.requestRenderAll();
           pushHistory();
+          showToast(t('loadDone'), 'success');
         });
       } catch {
-        alert(t('loadError'));
+        showToast(t('loadError'), 'error');
       }
     };
     reader.readAsText(file);
@@ -136,7 +139,7 @@ export default function Toolbar() {
           });
         }
       } catch {
-        alert(t('importError'));
+        showToast(t('importError'), 'error');
       }
     };
 
@@ -158,6 +161,7 @@ export default function Toolbar() {
     a.download = 'vector-drawing.svg';
     a.click();
     URL.revokeObjectURL(url);
+    showToast(t('exportDone'), 'success');
   };
 
   const handleExportPNG = () => {
@@ -170,6 +174,7 @@ export default function Toolbar() {
     a.href = dataUrl;
     a.download = 'vector-drawing.png';
     a.click();
+    showToast(t('exportDone'), 'success');
   };
 
   const handleExportPDF = async () => {
@@ -194,6 +199,7 @@ export default function Toolbar() {
 
     await pdf.svg(svgEl, { x: 0, y: 0, width: w, height: h });
     pdf.save('vector-drawing.pdf');
+    showToast(t('exportDone'), 'success');
   };
 
   const handleDeleteSelected = () => {

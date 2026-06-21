@@ -11,6 +11,7 @@ export type ToolType =
   | 'polygon'
   | 'polyline'
   | 'text'
+  | 'pencil'
   | 'measure'
   | 'dimension'
   | 'wall'

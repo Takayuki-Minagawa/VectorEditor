@@ -99,6 +99,8 @@ export default function ContextMenu() {
     canvas.setActiveObject(new fabric.ActiveSelection(sel, { canvas }));
     canvas.requestRenderAll(); pushHistory();
   });
+  const handleFlipH = () => exec(() => { if (active) { active.set('flipX', !active.flipX); active.setCoords(); canvas.requestRenderAll(); pushHistory(); } });
+  const handleFlipV = () => exec(() => { if (active) { active.set('flipY', !active.flipY); active.setCoords(); canvas.requestRenderAll(); pushHistory(); } });
   const handleBringToFront = () => exec(() => { if (active) { canvas.bringObjectToFront(active); canvas.requestRenderAll(); pushHistory(); } });
   const handleSendToBack = () => exec(() => { if (active) { canvas.sendObjectToBack(active); canvas.requestRenderAll(); pushHistory(); } });
   const handleBringForward = () => exec(() => { if (active) { canvas.bringObjectForward(active); canvas.requestRenderAll(); pushHistory(); } });
@@ -116,6 +118,9 @@ export default function ContextMenu() {
         <>
           <button className="context-item" onClick={handleCopy}>{t('ctx_copy')}</button>
           <button className="context-item" onClick={handleDuplicate}>{t('ctx_duplicate')}</button>
+          <div className="context-divider" />
+          <button className="context-item" onClick={handleFlipH}>{t('ctx_flipH')}</button>
+          <button className="context-item" onClick={handleFlipV}>{t('ctx_flipV')}</button>
           <div className="context-divider" />
           <button className="context-item" onClick={handleBringToFront}>{t('ctx_toFront')}</button>
           <button className="context-item" onClick={handleBringForward}>{t('ctx_forward')}</button>
