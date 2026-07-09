@@ -2,10 +2,15 @@ import { useEffect } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import {
-  assignNewObjectId,
-  ensureObjectIdsRecursive,
-  reassignObjectIdsRecursive,
-} from '../utils/objectIds';
+  copyActive,
+  deleteSelected,
+  duplicateActive,
+  groupSelection,
+  moveActiveBy,
+  pasteClipboard,
+  selectAll,
+  ungroupActive,
+} from '../utils/canvasCommands';
 
 export function useKeyboardShortcuts() {
   useEffect(() => {
@@ -51,127 +56,49 @@ export function useKeyboardShortcuts() {
       // Select all: Ctrl+A
       if (isMeta && e.key === 'a') {
         e.preventDefault();
-        canvas.discardActiveObject();
-        const objects = canvas.getObjects();
-        if (objects.length > 0) {
-          const selection = new fabric.ActiveSelection(objects, { canvas });
-          canvas.setActiveObject(selection);
-          canvas.requestRenderAll();
-        }
+        selectAll(canvas);
         return;
       }
 
       // Copy: Ctrl+C
       if (isMeta && e.key === 'c') {
         e.preventDefault();
-        const active = canvas.getActiveObject();
-        if (active) {
-          active.clone().then((cloned: fabric.FabricObject) => {
-            setClipboard([cloned]);
-          });
-        }
+        copyActive(canvas, setClipboard);
         return;
       }
 
       // Paste: Ctrl+V
       if (isMeta && e.key === 'v') {
         e.preventDefault();
-        if (clipboard && clipboard.length > 0) {
-          clipboard[0].clone().then((cloned: fabric.FabricObject) => {
-            reassignObjectIdsRecursive(cloned);
-            cloned.set({
-              left: (cloned.left || 0) + 20,
-              top: (cloned.top || 0) + 20,
-            });
-            if (cloned instanceof fabric.ActiveSelection) {
-              cloned.forEachObject((obj: fabric.FabricObject) => canvas.add(obj));
-            } else {
-              canvas.add(cloned);
-            }
-            canvas.setActiveObject(cloned);
-            canvas.requestRenderAll();
-            pushHistory();
-            // Update clipboard offset
-            setClipboard([cloned]);
-          });
-        }
+        pasteClipboard(canvas, clipboard, setClipboard, pushHistory);
         return;
       }
 
       // Duplicate: Ctrl+D
       if (isMeta && e.key === 'd') {
         e.preventDefault();
-        const active = canvas.getActiveObject();
-        if (active) {
-          active.clone().then((cloned: fabric.FabricObject) => {
-            reassignObjectIdsRecursive(cloned);
-            cloned.set({
-              left: (cloned.left || 0) + 20,
-              top: (cloned.top || 0) + 20,
-            });
-            if (cloned instanceof fabric.ActiveSelection) {
-              cloned.forEachObject((obj: fabric.FabricObject) => canvas.add(obj));
-            } else {
-              canvas.add(cloned);
-            }
-            canvas.setActiveObject(cloned);
-            canvas.requestRenderAll();
-            pushHistory();
-          });
-        }
+        duplicateActive(canvas, pushHistory);
         return;
       }
 
       // Group: Ctrl+G
       if (isMeta && !e.shiftKey && e.key === 'g') {
         e.preventDefault();
-        const active = canvas.getActiveObject();
-        if (active && active instanceof fabric.ActiveSelection) {
-          const objects = active.getObjects();
-          canvas.discardActiveObject();
-          const group = new fabric.Group(objects);
-          assignNewObjectId(group, 'group');
-          objects.forEach((obj) => canvas.remove(obj));
-          canvas.add(group);
-          canvas.setActiveObject(group);
-          canvas.requestRenderAll();
-          pushHistory();
-        }
+        groupSelection(canvas, pushHistory);
         return;
       }
 
       // Ungroup: Ctrl+Shift+G
       if (isMeta && e.shiftKey && e.key === 'G') {
         e.preventDefault();
-        const active = canvas.getActiveObject();
-        if (active && active instanceof fabric.Group) {
-          const items = [...active.getObjects()];
-          active.remove(...items);
-          canvas.remove(active);
-          const sel: fabric.FabricObject[] = [];
-          items.forEach((item) => {
-            ensureObjectIdsRecursive(item);
-            canvas.add(item);
-            sel.push(item);
-          });
-          const selection = new fabric.ActiveSelection(sel, { canvas });
-          canvas.setActiveObject(selection);
-          canvas.requestRenderAll();
-          pushHistory();
-        }
+        ungroupActive(canvas, pushHistory);
         return;
       }
 
       // Delete
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
-        const active = canvas.getActiveObjects();
-        if (active.length > 0) {
-          active.forEach((obj) => canvas.remove(obj));
-          canvas.discardActiveObject();
-          canvas.requestRenderAll();
-          pushHistory();
-        }
+        deleteSelected(canvas, pushHistory);
         return;
       }
 
@@ -183,21 +110,18 @@ export function useKeyboardShortcuts() {
         const step = e.shiftKey ? 10 : 1;
         switch (e.key) {
           case 'ArrowUp':
-            active.set({ top: (active.top || 0) - step });
+            moveActiveBy(canvas, 0, -step, pushHistory);
             break;
           case 'ArrowDown':
-            active.set({ top: (active.top || 0) + step });
+            moveActiveBy(canvas, 0, step, pushHistory);
             break;
           case 'ArrowLeft':
-            active.set({ left: (active.left || 0) - step });
+            moveActiveBy(canvas, -step, 0, pushHistory);
             break;
           case 'ArrowRight':
-            active.set({ left: (active.left || 0) + step });
+            moveActiveBy(canvas, step, 0, pushHistory);
             break;
         }
-        active.setCoords();
-        canvas.requestRenderAll();
-        pushHistory();
         return;
       }
 

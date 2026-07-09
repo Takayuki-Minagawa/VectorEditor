@@ -2,10 +2,22 @@ import { useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
-import type { DocumentData } from '../types';
-import { ensureObjectIdsRecursive, reassignObjectIdsRecursive } from '../utils/objectIds';
+import { ensureObjectIdsRecursive } from '../utils/objectIds';
+import {
+  deleteSelected,
+  duplicateActive,
+  selectAll,
+  stackActive,
+} from '../utils/canvasCommands';
+import {
+  createDocumentData,
+  parseDocumentData,
+  restoreDocumentData,
+} from '../utils/documentSerializer';
 import NumericMoveDialog from './NumericMoveDialog';
 import CadExportDialog from './CadExportDialog';
+
+type Alignment = 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom';
 
 export default function Toolbar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -35,17 +47,17 @@ export default function Toolbar() {
 
   const handleSaveJSON = () => {
     if (!canvas) return;
-    const data: DocumentData = {
-      documentId: `doc_${Date.now()}`,
-      canvas: { width: canvasWidth, height: canvasHeight, backgroundColor },
-      objects: JSON.stringify(canvas.toObject(['id', 'name', 'selectable', 'evented'])),
-      version: 1,
+    const data = createDocumentData({
+      canvas,
+      canvasWidth,
+      canvasHeight,
+      backgroundColor,
       drawingMode,
       cadUnit,
       scale,
       cadWidth,
       cadHeight,
-    };
+    });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -66,20 +78,20 @@ export default function Toolbar() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const data: DocumentData = JSON.parse(ev.target?.result as string);
+        const data = parseDocumentData(ev.target?.result as string);
         const { setCanvasSize, setBackgroundColor, setDrawingMode, setCadUnit, setScale, setCadSize } = useEditorStore.getState();
-        setCanvasSize(data.canvas.width, data.canvas.height);
-        setBackgroundColor(data.canvas.backgroundColor);
-        if (data.drawingMode) setDrawingMode(data.drawingMode);
-        if (data.cadUnit) setCadUnit(data.cadUnit);
-        if (data.scale) setScale(data.scale);
-        if (data.cadWidth && data.cadHeight) setCadSize(data.cadWidth, data.cadHeight);
-        const json = JSON.parse(data.objects);
-        canvas.loadFromJSON(json).then(() => {
-          canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
-          canvas.requestRenderAll();
+        restoreDocumentData(canvas, data, {
+          setCanvasSize,
+          setBackgroundColor,
+          setDrawingMode,
+          setCadUnit,
+          setScale,
+          setCadSize,
+        }).then(() => {
           pushHistory();
           showToast(t('loadDone'), 'success');
+        }).catch(() => {
+          showToast(t('loadError'), 'error');
         });
       } catch {
         showToast(t('loadError'), 'error');
@@ -204,67 +216,37 @@ export default function Toolbar() {
 
   const handleDeleteSelected = () => {
     if (!canvas) return;
-    const active = canvas.getActiveObjects();
-    if (active.length === 0) return;
-    active.forEach((obj) => canvas.remove(obj));
-    canvas.discardActiveObject();
-    canvas.requestRenderAll();
-    pushHistory();
+    deleteSelected(canvas, pushHistory);
   };
 
   const handleSelectAll = () => {
     if (!canvas) return;
-    canvas.discardActiveObject();
-    const objects = canvas.getObjects();
-    if (objects.length === 0) return;
-    const selection = new fabric.ActiveSelection(objects, { canvas });
-    canvas.setActiveObject(selection);
-    canvas.requestRenderAll();
+    selectAll(canvas);
   };
 
   const handleDuplicate = () => {
     if (!canvas) return;
-    const active = canvas.getActiveObject();
-    if (!active) return;
-    active.clone().then((cloned: fabric.FabricObject) => {
-      reassignObjectIdsRecursive(cloned);
-      cloned.set({ left: (cloned.left || 0) + 20, top: (cloned.top || 0) + 20 });
-      if (cloned instanceof fabric.ActiveSelection) {
-        cloned.forEachObject((obj: fabric.FabricObject) => {
-          canvas.add(obj);
-        });
-        cloned.setCoords();
-      } else {
-        canvas.add(cloned);
-      }
-      canvas.setActiveObject(cloned);
-      canvas.requestRenderAll();
-      pushHistory();
-    });
+    duplicateActive(canvas, pushHistory);
   };
 
   const bringForward = () => {
     if (!canvas) return;
-    const obj = canvas.getActiveObject();
-    if (obj) { canvas.bringObjectForward(obj); canvas.requestRenderAll(); pushHistory(); }
+    stackActive(canvas, 'bringForward', pushHistory);
   };
   const sendBackward = () => {
     if (!canvas) return;
-    const obj = canvas.getActiveObject();
-    if (obj) { canvas.sendObjectBackwards(obj); canvas.requestRenderAll(); pushHistory(); }
+    stackActive(canvas, 'sendBackward', pushHistory);
   };
   const bringToFront = () => {
     if (!canvas) return;
-    const obj = canvas.getActiveObject();
-    if (obj) { canvas.bringObjectToFront(obj); canvas.requestRenderAll(); pushHistory(); }
+    stackActive(canvas, 'bringToFront', pushHistory);
   };
   const sendToBack = () => {
     if (!canvas) return;
-    const obj = canvas.getActiveObject();
-    if (obj) { canvas.sendObjectToBack(obj); canvas.requestRenderAll(); pushHistory(); }
+    stackActive(canvas, 'sendToBack', pushHistory);
   };
 
-  const alignObjects = (alignment: string) => {
+  const alignObjects = (alignment: Alignment) => {
     if (!canvas) return;
     const activeObj = canvas.getActiveObject();
     if (!activeObj || !(activeObj instanceof fabric.ActiveSelection)) return;

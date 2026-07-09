@@ -2,11 +2,18 @@ import { useEffect, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
+import { disposeAll } from '../utils/disposers';
 import {
-  assignNewObjectId,
-  ensureObjectIdsRecursive,
-  reassignObjectIdsRecursive,
-} from '../utils/objectIds';
+  copyActive,
+  deleteSelected,
+  duplicateActive,
+  flipActive,
+  groupSelection,
+  pasteClipboard,
+  stackActive,
+  toggleActiveLock,
+  ungroupActive,
+} from '../utils/canvasCommands';
 
 interface MenuPos { x: number; y: number; }
 
@@ -22,16 +29,21 @@ export default function ContextMenu() {
 
   useEffect(() => {
     if (!canvas) return;
-    canvas.upperCanvasEl.addEventListener('contextmenu', (e) => e.preventDefault());
-    canvas.on('mouse:down:before', (opt) => {
+    const preventDefaultContextMenu = (e: MouseEvent) => e.preventDefault();
+    const handleMouseDownBefore = (opt: fabric.TPointerEventInfo) => {
       const me = opt.e as MouseEvent;
       if (me.button !== 2) close();
-    });
-    canvas.on('mouse:up', (opt) => {
+    };
+    const handleMouseUp = (opt: fabric.TPointerEventInfo) => {
       const me = opt.e as MouseEvent;
       if (me.button === 2) setPos({ x: me.clientX, y: me.clientY });
-    });
-    return () => { canvas.off('mouse:down:before'); canvas.off('mouse:up'); };
+    };
+    canvas.upperCanvasEl.addEventListener('contextmenu', preventDefaultContextMenu);
+    return disposeAll([
+      () => canvas.upperCanvasEl.removeEventListener('contextmenu', preventDefaultContextMenu),
+      canvas.on('mouse:down:before', handleMouseDownBefore),
+      canvas.on('mouse:up', handleMouseUp),
+    ]);
   }, [canvas, close]);
 
   useEffect(() => {
@@ -52,65 +64,19 @@ export default function ContextMenu() {
 
   const exec = (fn: () => void) => { fn(); close(); };
 
-  const handleCopy = () => exec(() => {
-    if (active) active.clone().then((c: fabric.FabricObject) => setClipboard([c]));
-  });
-  const handlePaste = () => exec(() => {
-    if (!clipboard || clipboard.length === 0) return;
-    clipboard[0].clone().then((cloned: fabric.FabricObject) => {
-      reassignObjectIdsRecursive(cloned);
-      cloned.set({ left: (cloned.left || 0) + 20, top: (cloned.top || 0) + 20 });
-      if (cloned instanceof fabric.ActiveSelection) cloned.forEachObject((obj: fabric.FabricObject) => canvas.add(obj));
-      else canvas.add(cloned);
-      canvas.setActiveObject(cloned); canvas.requestRenderAll(); pushHistory(); setClipboard([cloned]);
-    });
-  });
-  const handleDuplicate = () => exec(() => {
-    if (!active) return;
-    active.clone().then((cloned: fabric.FabricObject) => {
-      reassignObjectIdsRecursive(cloned);
-      cloned.set({ left: (cloned.left || 0) + 20, top: (cloned.top || 0) + 20 });
-      if (cloned instanceof fabric.ActiveSelection) cloned.forEachObject((obj: fabric.FabricObject) => canvas.add(obj));
-      else canvas.add(cloned);
-      canvas.setActiveObject(cloned); canvas.requestRenderAll(); pushHistory();
-    });
-  });
-  const handleDelete = () => exec(() => {
-    canvas.getActiveObjects().forEach((o) => canvas.remove(o));
-    canvas.discardActiveObject(); canvas.requestRenderAll(); pushHistory();
-  });
-  const handleGroup = () => exec(() => {
-    if (!isMultiple) return;
-    const objects = (active as fabric.ActiveSelection).getObjects();
-    canvas.discardActiveObject();
-    const group = new fabric.Group(objects);
-    assignNewObjectId(group, 'group');
-    objects.forEach((o) => canvas.remove(o));
-    canvas.add(group); canvas.setActiveObject(group); canvas.requestRenderAll(); pushHistory();
-  });
-  const handleUngroup = () => exec(() => {
-    if (!isGroup) return;
-    const items = (active as fabric.Group).getObjects();
-    const group = active as fabric.Group;
-    group.remove(...items);
-    canvas.remove(active);
-    const sel: fabric.FabricObject[] = [];
-    items.forEach((item) => { ensureObjectIdsRecursive(item); canvas.add(item); sel.push(item); });
-    canvas.setActiveObject(new fabric.ActiveSelection(sel, { canvas }));
-    canvas.requestRenderAll(); pushHistory();
-  });
-  const handleFlipH = () => exec(() => { if (active) { active.set('flipX', !active.flipX); active.setCoords(); canvas.requestRenderAll(); pushHistory(); } });
-  const handleFlipV = () => exec(() => { if (active) { active.set('flipY', !active.flipY); active.setCoords(); canvas.requestRenderAll(); pushHistory(); } });
-  const handleBringToFront = () => exec(() => { if (active) { canvas.bringObjectToFront(active); canvas.requestRenderAll(); pushHistory(); } });
-  const handleSendToBack = () => exec(() => { if (active) { canvas.sendObjectToBack(active); canvas.requestRenderAll(); pushHistory(); } });
-  const handleBringForward = () => exec(() => { if (active) { canvas.bringObjectForward(active); canvas.requestRenderAll(); pushHistory(); } });
-  const handleSendBackward = () => exec(() => { if (active) { canvas.sendObjectBackwards(active); canvas.requestRenderAll(); pushHistory(); } });
-  const handleLock = () => exec(() => {
-    if (!active) return;
-    const locked = !active.lockMovementX;
-    active.set({ lockMovementX: locked, lockMovementY: locked, lockScalingX: locked, lockScalingY: locked, lockRotation: locked, hasControls: !locked });
-    canvas.requestRenderAll();
-  });
+  const handleCopy = () => exec(() => copyActive(canvas, setClipboard));
+  const handlePaste = () => exec(() => pasteClipboard(canvas, clipboard, setClipboard, pushHistory));
+  const handleDuplicate = () => exec(() => duplicateActive(canvas, pushHistory));
+  const handleDelete = () => exec(() => deleteSelected(canvas, pushHistory));
+  const handleGroup = () => exec(() => groupSelection(canvas, pushHistory));
+  const handleUngroup = () => exec(() => ungroupActive(canvas, pushHistory));
+  const handleFlipH = () => exec(() => flipActive(canvas, 'x', pushHistory));
+  const handleFlipV = () => exec(() => flipActive(canvas, 'y', pushHistory));
+  const handleBringToFront = () => exec(() => stackActive(canvas, 'bringToFront', pushHistory));
+  const handleSendToBack = () => exec(() => stackActive(canvas, 'sendToBack', pushHistory));
+  const handleBringForward = () => exec(() => stackActive(canvas, 'bringForward', pushHistory));
+  const handleSendBackward = () => exec(() => stackActive(canvas, 'sendBackward', pushHistory));
+  const handleLock = () => exec(() => toggleActiveLock(canvas));
 
   return (
     <div className="context-menu" style={{ left: pos.x, top: pos.y }} onClick={(e) => e.stopPropagation()}>
