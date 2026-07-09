@@ -1,7 +1,15 @@
 import { create } from 'zustand';
-import * as fabric from 'fabric';
+import type * as fabric from 'fabric';
 import type { ToolType, DrawingMode, CadUnit } from '../types';
-import { ensureObjectIdsRecursive } from '../utils/objectIds';
+import { restoreCanvasObjects, serializeCanvasObjects } from '../utils/documentSerializer';
+import {
+  applyThemeToDom,
+  loadThemePreference,
+  saveThemePreference,
+} from '../utils/themePreference';
+import type { Theme } from '../utils/themePreference';
+import { configureCanvasForTool } from '../utils/toolActivation';
+import { createToastId, scheduleToastRemoval } from '../utils/toastScheduler';
 
 interface EditorStore {
   // Tool
@@ -92,28 +100,12 @@ interface EditorStore {
   removeToast: (id: number) => void;
 }
 
-export type Theme = 'light' | 'dark';
+export type { Theme } from '../utils/themePreference';
 export type ToastType = 'info' | 'success' | 'error';
 export interface Toast {
   id: number;
   message: string;
   type: ToastType;
-}
-
-const THEME_STORAGE_KEY = 'vectoreditor-theme';
-
-function loadTheme(): Theme {
-  try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (saved === 'dark' || saved === 'light') return saved;
-  } catch { /* ignore */ }
-  return 'light';
-}
-
-function applyThemeToDom(theme: Theme) {
-  if (typeof document !== 'undefined') {
-    document.documentElement.dataset.theme = theme;
-  }
 }
 
 const MAX_HISTORY = 50;
@@ -128,24 +120,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setActiveTool: (tool) => {
     const { canvas } = get();
     if (canvas) {
-      const isPencil = tool === 'pencil';
-      canvas.isDrawingMode = isPencil;
-      if (isPencil) {
-        const brush = new fabric.PencilBrush(canvas);
-        brush.width = 2;
-        brush.color = '#1F4E79';
-        canvas.freeDrawingBrush = brush;
-      }
-      canvas.selection = tool === 'select';
-      canvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
-      canvas.forEachObject((obj) => {
-        obj.selectable = tool === 'select';
-        obj.evented = tool === 'select';
-      });
-      if (tool !== 'select') {
-        canvas.discardActiveObject();
-        canvas.requestRenderAll();
-      }
+      configureCanvasForTool(canvas, tool);
     }
     set({ activeTool: tool });
   },
@@ -199,7 +174,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   pushHistory: () => {
     const { canvas, history, historyIndex, _skipHistoryPush } = get();
     if (!canvas || _skipHistoryPush) return;
-    const json = JSON.stringify(canvas.toObject(['id', 'name', 'selectable', 'evented']));
+    const json = serializeCanvasObjects(canvas);
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(json);
     if (newHistory.length > MAX_HISTORY) newHistory.shift();
@@ -210,9 +185,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     if (!canvas || historyIndex <= 0) return;
     const newIndex = historyIndex - 1;
     set({ _skipHistoryPush: true, historyIndex: newIndex });
-    canvas.loadFromJSON(JSON.parse(history[newIndex])).then(() => {
-      canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
-      canvas.requestRenderAll();
+    restoreCanvasObjects(canvas, history[newIndex]).then(() => {
       set({ _skipHistoryPush: false });
     });
   },
@@ -221,9 +194,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     if (!canvas || historyIndex >= history.length - 1) return;
     const newIndex = historyIndex + 1;
     set({ _skipHistoryPush: true, historyIndex: newIndex });
-    canvas.loadFromJSON(JSON.parse(history[newIndex])).then(() => {
-      canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
-      canvas.requestRenderAll();
+    restoreCanvasObjects(canvas, history[newIndex]).then(() => {
       set({ _skipHistoryPush: false });
     });
   },
@@ -251,21 +222,21 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   cursorPos: null,
   setCursorPos: (pos) => set({ cursorPos: pos }),
 
-  theme: loadTheme(),
+  theme: loadThemePreference(),
   toggleTheme: () => {
     const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
-    try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch { /* ignore */ }
+    saveThemePreference(next);
     applyThemeToDom(next);
     set({ theme: next });
   },
 
   toasts: [],
   showToast: (message, type = 'info') => {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const id = createToastId();
     set((s) => ({ toasts: [...s.toasts, { id, message, type }] }));
-    setTimeout(() => {
+    scheduleToastRemoval(() => {
       set((s) => ({ toasts: s.toasts.filter((tt) => tt.id !== id) }));
-    }, 3000);
+    });
   },
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((tt) => tt.id !== id) })),
 }));

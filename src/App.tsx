@@ -14,7 +14,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { clearAutoSave, loadAutoSave, useAutoSave, type AutoSaveData } from './hooks/useAutoSave';
 import { useEditorStore } from './store/useEditorStore';
 import { useI18n } from './i18n/useI18n';
-import { ensureObjectIdsRecursive } from './utils/objectIds';
+import { restoreDocumentData } from './utils/documentSerializer';
 
 function App() {
   const canvas = useEditorStore((s) => s.canvas);
@@ -40,31 +40,24 @@ function App() {
   const applyRestore = (saved: AutoSaveData) => {
     if (!canvas) return;
     const { setCanvasSize, setBackgroundColor, pushHistory, setDrawingMode, setCadUnit, setScale, setCadSize, showToast } = useEditorStore.getState();
-    setCanvasSize(saved.canvas.width, saved.canvas.height);
-    setBackgroundColor(saved.canvas.backgroundColor);
-    if (saved.drawingMode) setDrawingMode(saved.drawingMode);
-    if (saved.cadUnit) setCadUnit(saved.cadUnit);
-    if (saved.scale) setScale(saved.scale);
-    if (saved.cadWidth && saved.cadHeight) setCadSize(saved.cadWidth, saved.cadHeight);
 
     setRestoring(true);
     setPendingRestore(null);
-    try {
-      const json = JSON.parse(saved.objects);
-      canvas.loadFromJSON(json).then(() => {
-        canvas.getObjects().forEach((obj) => ensureObjectIdsRecursive(obj));
-        canvas.requestRenderAll();
+    restoreDocumentData(canvas, saved, {
+      setCanvasSize,
+      setBackgroundColor,
+      setDrawingMode,
+      setCadUnit,
+      setScale,
+      setCadSize,
+    }).then(() => {
         pushHistory();
         showToast(t('restoreDone'), 'success');
-      }).catch(() => {
-        clearAutoSave();
-      }).finally(() => {
-        setRestoring(false);
-      });
-    } catch {
+    }).catch(() => {
       clearAutoSave();
+    }).finally(() => {
       setRestoring(false);
-    }
+    });
   };
 
   const discardRestore = () => {

@@ -6,6 +6,13 @@ interface Props {
   onCancel: () => void;
 }
 
+interface KatexApi {
+  renderToString: (
+    latex: string,
+    options: { throwOnError: boolean; displayMode: boolean },
+  ) => string;
+}
+
 let katexCssLoaded = false;
 function ensureKatexCss(): void {
   if (katexCssLoaded) return;
@@ -26,8 +33,7 @@ export default function LatexDialog({ onPlace, onCancel }: Props) {
   const [previewHtml, setPreviewHtml] = useState('');
   const [ready, setReady] = useState(false);
   const [placing, setPlacing] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const katexRef = useRef<any>(null);
+  const katexRef = useRef<KatexApi | null>(null);
   const renderRef = useRef<HTMLDivElement>(null);
 
   // Load KaTeX on mount
