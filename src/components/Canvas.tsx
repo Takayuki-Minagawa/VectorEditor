@@ -33,6 +33,7 @@ export default function Canvas() {
 
   const {
     setCanvas,
+    canvas: storeCanvas,
     canvasWidth,
     canvasHeight,
     backgroundColor,
@@ -71,7 +72,7 @@ export default function Canvas() {
   const [stretchDy, setStretchDy] = useState(0);
 
   const { isPanning, lastPanPoint, spacePressed } = useCadViewport({
-    fabricRef,
+    canvas: storeCanvas,
     wrapperRef,
     drawingMode,
     zoom,
@@ -79,7 +80,6 @@ export default function Canvas() {
     canvasHeight,
     cadWidth,
     cadHeight,
-    backgroundColor,
     gridVisible,
     gridSize,
   });

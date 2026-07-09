@@ -15,11 +15,9 @@ function finishMutation(canvas: fabric.Canvas, pushHistory?: PushHistory): void 
 
 function addObjectOrSelection(canvas: fabric.Canvas, obj: fabric.FabricObject): fabric.FabricObject {
   if (obj instanceof fabric.ActiveSelection) {
-    const objects = obj.getObjects();
-    objects.forEach((child) => canvas.add(child));
-    const selection = new fabric.ActiveSelection(objects, { canvas });
-    selection.setCoords();
-    return selection;
+    obj.forEachObject((child) => canvas.add(child));
+    obj.setCoords();
+    return obj;
   }
   canvas.add(obj);
   return obj;

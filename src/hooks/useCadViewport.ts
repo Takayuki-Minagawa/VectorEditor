@@ -3,8 +3,12 @@ import type { RefObject } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 
+function setCanvasBackground(canvas: fabric.Canvas, backgroundColor: string): void {
+  canvas.backgroundColor = backgroundColor;
+}
+
 interface UseCadViewportProps {
-  fabricRef: RefObject<fabric.Canvas | null>;
+  canvas: fabric.Canvas | null;
   wrapperRef: RefObject<HTMLDivElement | null>;
   drawingMode: 'illustration' | 'cad';
   zoom: number;
@@ -12,13 +16,12 @@ interface UseCadViewportProps {
   canvasHeight: number;
   cadWidth: number;
   cadHeight: number;
-  backgroundColor: string;
   gridVisible: boolean;
   gridSize: number;
 }
 
 export function useCadViewport({
-  fabricRef,
+  canvas,
   wrapperRef,
   drawingMode,
   zoom,
@@ -26,7 +29,6 @@ export function useCadViewport({
   canvasHeight,
   cadWidth,
   cadHeight,
-  backgroundColor,
   gridVisible,
   gridSize,
 }: UseCadViewportProps) {
@@ -37,8 +39,8 @@ export function useCadViewport({
   const cadInitDone = useRef(false);
 
   useEffect(() => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
+    const activeCanvas = canvas;
+    if (!activeCanvas) return;
 
     if (drawingMode === 'cad') {
       if (!cadInitDone.current) {
@@ -48,61 +50,61 @@ export function useCadViewport({
           const rect = wrapper.getBoundingClientRect();
           const w = rect.width || 800;
           const h = rect.height || 600;
-          canvas.setDimensions({ width: w, height: h });
-          canvas.backgroundColor = '#f5f5f5';
+          activeCanvas.setDimensions({ width: w, height: h });
+          setCanvasBackground(activeCanvas, '#f5f5f5');
 
           const fitZoom = Math.min(w / cadWidth, h / cadHeight) * 0.9;
           const panX = (w - cadWidth * fitZoom) / 2;
           const panY = (h - cadHeight * fitZoom) / 2;
-          canvas.setViewportTransform([fitZoom, 0, 0, fitZoom, panX, panY]);
+          activeCanvas.setViewportTransform([fitZoom, 0, 0, fitZoom, panX, panY]);
 
           zoomFromWheel.current = true;
           useEditorStore.setState({ zoom: fitZoom });
         }
       } else if (!zoomFromWheel.current) {
-        const center = new fabric.Point(canvas.width! / 2, canvas.height! / 2);
-        canvas.zoomToPoint(center, zoom);
+        const center = new fabric.Point(activeCanvas.width! / 2, activeCanvas.height! / 2);
+        activeCanvas.zoomToPoint(center, zoom);
       }
       zoomFromWheel.current = false;
     } else {
       if (cadInitDone.current) {
         cadInitDone.current = false;
-        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-        canvas.backgroundColor = backgroundColor;
+        activeCanvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        setCanvasBackground(activeCanvas, useEditorStore.getState().backgroundColor);
       }
-      canvas.setZoom(zoom);
-      canvas.setDimensions({
+      activeCanvas.setZoom(zoom);
+      activeCanvas.setDimensions({
         width: canvasWidth * zoom,
         height: canvasHeight * zoom,
       });
     }
-    canvas.requestRenderAll();
-  }, [fabricRef, wrapperRef, zoom, canvasWidth, canvasHeight, drawingMode, cadWidth, cadHeight, backgroundColor]);
+    activeCanvas.requestRenderAll();
+  }, [canvas, wrapperRef, zoom, canvasWidth, canvasHeight, drawingMode, cadWidth, cadHeight]);
 
   useEffect(() => {
     if (drawingMode !== 'cad') return;
-    const canvas = fabricRef.current;
+    const activeCanvas = canvas;
     const wrapper = wrapperRef.current;
-    if (!canvas || !wrapper) return;
+    if (!activeCanvas || !wrapper) return;
 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
       const { width, height } = entry.contentRect;
       if (width > 0 && height > 0) {
-        canvas.setDimensions({ width, height });
-        canvas.requestRenderAll();
+        activeCanvas.setDimensions({ width, height });
+        activeCanvas.requestRenderAll();
       }
     });
 
     observer.observe(wrapper);
     return () => observer.disconnect();
-  }, [fabricRef, wrapperRef, drawingMode]);
+  }, [canvas, wrapperRef, drawingMode]);
 
   useEffect(() => {
     if (drawingMode !== 'cad') return;
-    const canvas = fabricRef.current;
-    if (!canvas) return;
+    const activeCanvas = canvas;
+    if (!activeCanvas) return;
 
     const handleWheel = (opt: fabric.TPointerEventInfo<WheelEvent>) => {
       const e = opt.e;
@@ -110,40 +112,40 @@ export function useCadViewport({
       e.stopPropagation();
 
       const delta = e.deltaY;
-      let newZoom = canvas.getZoom() * (1 - delta / 300);
+      let newZoom = activeCanvas.getZoom() * (1 - delta / 300);
       newZoom = Math.max(0.001, Math.min(100, newZoom));
 
-      const point = canvas.getScenePoint(e);
-      canvas.zoomToPoint(new fabric.Point(point.x, point.y), newZoom);
+      const point = activeCanvas.getScenePoint(e);
+      activeCanvas.zoomToPoint(new fabric.Point(point.x, point.y), newZoom);
 
       zoomFromWheel.current = true;
       useEditorStore.setState({ zoom: newZoom });
-      canvas.requestRenderAll();
+      activeCanvas.requestRenderAll();
     };
 
-    return canvas.on('mouse:wheel', handleWheel);
-  }, [fabricRef, drawingMode]);
+    return activeCanvas.on('mouse:wheel', handleWheel);
+  }, [canvas, drawingMode]);
 
   useEffect(() => {
     if (drawingMode !== 'cad') {
       spacePressed.current = false;
       return;
     }
+    const activeCanvas = canvas;
+    if (!activeCanvas) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
         spacePressed.current = true;
-        const canvas = fabricRef.current;
-        if (canvas) canvas.defaultCursor = 'grab';
+        activeCanvas.defaultCursor = 'grab';
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         spacePressed.current = false;
-        const canvas = fabricRef.current;
         const tool = useEditorStore.getState().activeTool;
-        if (canvas) canvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
+        activeCanvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
       }
     };
 
@@ -154,26 +156,26 @@ export function useCadViewport({
       window.removeEventListener('keyup', handleKeyUp);
       spacePressed.current = false;
     };
-  }, [fabricRef, drawingMode]);
+  }, [canvas, drawingMode]);
 
   useEffect(() => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
+    const activeCanvas = canvas;
+    if (!activeCanvas) return;
     if (drawingMode !== 'cad') {
-      canvas.requestRenderAll();
+      activeCanvas.requestRenderAll();
       return;
     }
 
     const handler = () => {
-      const ctx = canvas.getContext();
-      const vpt = canvas.viewportTransform;
+      const ctx = activeCanvas.getContext();
+      const vpt = activeCanvas.viewportTransform;
       if (!vpt) return;
 
-      const z = canvas.getZoom();
+      const z = activeCanvas.getZoom();
       const panX = vpt[4];
       const panY = vpt[5];
-      const w = canvas.width || 0;
-      const h = canvas.height || 0;
+      const w = activeCanvas.width || 0;
+      const h = activeCanvas.height || 0;
 
       const dx0 = panX;
       const dy0 = panY;
@@ -218,13 +220,13 @@ export function useCadViewport({
       }
     };
 
-    const dispose = canvas.on('after:render', handler);
-    canvas.requestRenderAll();
+    const dispose = activeCanvas.on('after:render', handler);
+    activeCanvas.requestRenderAll();
     return () => {
       dispose();
-      canvas.requestRenderAll();
+      activeCanvas.requestRenderAll();
     };
-  }, [fabricRef, drawingMode, gridVisible, gridSize, cadWidth, cadHeight]);
+  }, [canvas, drawingMode, gridVisible, gridSize, cadWidth, cadHeight]);
 
   return { isPanning, lastPanPoint, spacePressed };
 }

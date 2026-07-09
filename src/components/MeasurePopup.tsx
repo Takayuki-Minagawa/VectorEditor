@@ -38,13 +38,15 @@ function MeasureBody({ result }: { result: MeasureResult }) {
 
 export default function MeasurePopup({ result, onClose }: MeasurePopupProps) {
   const t = useI18n((s) => s.t);
-  const [measureCopied, setMeasureCopied] = useState(false);
+  const resultKey = `${result.x}:${result.y}:${result.width}:${result.height}`;
+  const [copiedResultKey, setCopiedResultKey] = useState<string | null>(null);
+  const measureCopied = copiedResultKey === resultKey;
 
   const handleCopyMeasure = () => {
     const text = `x=${result.x}, y=${result.y}, width=${result.width}, height=${result.height}`;
     navigator.clipboard.writeText(text).then(() => {
-      setMeasureCopied(true);
-      setTimeout(() => setMeasureCopied(false), 1500);
+      setCopiedResultKey(resultKey);
+      setTimeout(() => setCopiedResultKey(null), 1500);
     });
   };
 

@@ -40,12 +40,6 @@ function App() {
   const applyRestore = (saved: AutoSaveData) => {
     if (!canvas) return;
     const { setCanvasSize, setBackgroundColor, pushHistory, setDrawingMode, setCadUnit, setScale, setCadSize, showToast } = useEditorStore.getState();
-    setCanvasSize(saved.canvas.width, saved.canvas.height);
-    setBackgroundColor(saved.canvas.backgroundColor);
-    if (saved.drawingMode) setDrawingMode(saved.drawingMode);
-    if (saved.cadUnit) setCadUnit(saved.cadUnit);
-    if (saved.scale) setScale(saved.scale);
-    if (saved.cadWidth && saved.cadHeight) setCadSize(saved.cadWidth, saved.cadHeight);
 
     setRestoring(true);
     setPendingRestore(null);
