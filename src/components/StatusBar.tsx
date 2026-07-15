@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import { mmToUnit, formatReal } from '../types';
@@ -5,6 +6,45 @@ import type { CadUnit } from '../types';
 
 const SCALES = ['1:1', '1:10', '1:20', '1:50', '1:100', '1:200', '1:500'];
 const UNITS: CadUnit[] = ['mm', 'cm', 'm'];
+
+function GridSizeInput({ value, onCommit }: { value: number; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  const cancelCommitRef = useRef(false);
+  const parsed = Number(draft);
+  const valid = draft.trim() !== '' && Number.isFinite(parsed) && parsed >= 5 && parsed <= 200;
+  const commit = () => {
+    if (cancelCommitRef.current) {
+      cancelCommitRef.current = false;
+      setDraft(String(value));
+      return;
+    }
+    if (valid) onCommit(parsed);
+    else setDraft(String(value));
+  };
+
+  return (
+    <input
+      id="status-grid-size"
+      className="status-input"
+      type="number"
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelCommitRef.current = true;
+          setDraft(String(value));
+          event.currentTarget.blur();
+        }
+      }}
+      min={5}
+      max={200}
+      aria-invalid={!valid}
+    />
+  );
+}
 
 export default function StatusBar() {
   const zoom = useEditorStore((s) => s.zoom);
@@ -105,6 +145,7 @@ export default function StatusBar() {
           className={`status-mode-btn ${!isCad ? 'active' : ''}`}
           onClick={() => setDrawingMode('illustration')}
           title={t('tip_modeIllustration')}
+          aria-pressed={!isCad}
         >
           {t('modeIllustration')}
         </button>
@@ -112,6 +153,7 @@ export default function StatusBar() {
           className={`status-mode-btn ${isCad ? 'active' : ''}`}
           onClick={() => setDrawingMode('cad')}
           title={t('tip_modeCad')}
+          aria-pressed={isCad}
         >
           {t('modeCad')}
         </button>
@@ -119,8 +161,9 @@ export default function StatusBar() {
         {isCad && (
           <>
             <span className="status-separator">|</span>
-            <label className="status-inline-label">{t('cadUnit')}</label>
+            <label className="status-inline-label" htmlFor="status-cad-unit">{t('cadUnit')}</label>
             <select
+              id="status-cad-unit"
               className="status-select"
               value={cadUnit}
               onChange={(e) => setCadUnit(e.target.value as CadUnit)}
@@ -133,8 +176,9 @@ export default function StatusBar() {
         )}
 
         <span className="status-separator">|</span>
-        <label className="status-inline-label">{t('scale')}</label>
+        <label className="status-inline-label" htmlFor="status-scale">{t('scale')}</label>
         <select
+          id="status-scale"
           className="status-select"
           value={scale}
           onChange={(e) => setScale(e.target.value)}
@@ -144,15 +188,8 @@ export default function StatusBar() {
           ))}
         </select>
         <span className="status-separator">|</span>
-        <label className="status-inline-label">{t('gridSize')}</label>
-        <input
-          className="status-input"
-          type="number"
-          value={gridSize}
-          onChange={(e) => setGridSize(Number(e.target.value))}
-          min={5}
-          max={200}
-        />
+        <label className="status-inline-label" htmlFor="status-grid-size">{t('gridSize')}</label>
+        <GridSizeInput key={gridSize} value={gridSize} onCommit={setGridSize} />
         {isCad && realGrid && (
           <span className="status-real-label">({realGrid} {cadUnit})</span>
         )}
@@ -160,6 +197,7 @@ export default function StatusBar() {
           className={`status-snap-btn ${snapToGrid ? 'active' : ''}`}
           onClick={toggleSnap}
           title={t('snapToGrid')}
+          aria-pressed={snapToGrid}
         >
           {t('snapToGrid')}
         </button>
@@ -167,6 +205,7 @@ export default function StatusBar() {
           className={`status-snap-btn ${snapToObjects ? 'active' : ''}`}
           onClick={toggleSnapToObjects}
           title={t('snapToObjects')}
+          aria-pressed={snapToObjects}
         >
           {t('snapToObjects')}
         </button>
@@ -174,6 +213,7 @@ export default function StatusBar() {
           className={`status-snap-btn ${snapToGuides ? 'active' : ''}`}
           onClick={toggleSnapToGuides}
           title={t('snapToGuides')}
+          aria-pressed={snapToGuides}
         >
           {t('snapToGuides')}
         </button>
@@ -181,6 +221,7 @@ export default function StatusBar() {
           className={`status-snap-btn ${orthoMode ? 'active' : ''}`}
           onClick={toggleOrtho}
           title={t('tip_ortho')}
+          aria-pressed={orthoMode}
         >
           {t('ortho')}
         </button>
@@ -198,14 +239,15 @@ export default function StatusBar() {
           className={`status-snap-btn ${showRulers ? 'active' : ''}`}
           onClick={toggleRulers}
           title={t('rulers')}
+          aria-pressed={showRulers}
         >
           {t('rulers')}
         </button>
         <span className="status-separator">|</span>
-        <button className="status-zoom-btn" onClick={() => { const idx = zoomLevels.findIndex((z) => z >= zoom); if (idx > 0) setZoom(zoomLevels[idx - 1]); }}>−</button>
+        <button className="status-zoom-btn" onClick={() => { const idx = zoomLevels.findIndex((z) => z >= zoom); if (idx > 0) setZoom(zoomLevels[idx - 1]); }} aria-label={t('zoomOut')}>−</button>
         <span className="status-zoom-label">{Math.round(zoom * 100)}%</span>
-        <button className="status-zoom-btn" onClick={() => { const idx = zoomLevels.findIndex((z) => z > zoom); if (idx >= 0) setZoom(zoomLevels[idx]); }}>+</button>
-        <button className="status-zoom-btn" onClick={() => setZoom(1)}>100%</button>
+        <button className="status-zoom-btn" onClick={() => { const idx = zoomLevels.findIndex((z) => z > zoom); if (idx >= 0) setZoom(zoomLevels[idx]); }} aria-label={t('zoomIn')}>+</button>
+        <button className="status-zoom-btn" onClick={() => setZoom(1)} aria-label={t('zoomReset')}>100%</button>
         {isCad && (
           <>
             <button className="status-zoom-btn" onClick={handleFitView} title={t('fitView')} style={{ width: 'auto', padding: '0 6px', fontSize: 10 }}>{t('fitView')}</button>

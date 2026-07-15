@@ -1,10 +1,19 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useId, useState, useCallback } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import { CANVAS_PRESETS, mmToUnit, unitToMm, formatReal } from '../types';
 import type { TranslationKeys } from '../i18n/ja';
-import { ColorField, NumberField, PropertyField } from './PropertyField';
+import { ColorField, NumberField, PropertyField, TextField } from './PropertyField';
+import {
+  applyEditorStyle,
+  BUILTIN_STYLE_PRESETS,
+  captureEditorStyle,
+  loadCurrentEditorStyle,
+  saveCurrentEditorStyle,
+  styleKindForObject,
+} from '../utils/stylePresets';
+import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
 
 interface ObjProps {
   left: number; top: number; width: number; height: number; angle: number;
@@ -43,21 +52,28 @@ export default function PropertyPanel() {
   const [props, setProps] = useState<ObjProps>(defaultProps);
   const [isText, setIsText] = useState(false);
   const [isRect, setIsRect] = useState(false);
+  const presetId = useId();
+  const opacityId = useId();
+  const fontId = useId();
+  const textAlignId = useId();
 
   const readProps = useCallback(() => {
     if (!canvas) return;
     const obj = canvas.getActiveObject();
     if (!obj) { setProps(defaultProps); return; }
-    const bound = obj.getBoundingRect();
+    const displayWidth = obj.getScaledWidth();
+    const displayHeight = obj.getScaledHeight();
+    const appearance = captureEditorStyle(obj);
     setIsText(obj instanceof fabric.Textbox || obj instanceof fabric.IText);
     setIsRect(obj instanceof fabric.Rect);
     setProps({
       left: Math.round(obj.left || 0), top: Math.round(obj.top || 0),
-      width: Math.round(bound.width), height: Math.round(bound.height),
+      width: Math.round(displayWidth), height: Math.round(displayHeight),
       angle: Math.round(obj.angle || 0),
-      fill: (typeof obj.fill === 'string' ? obj.fill : '') || '',
-      stroke: (typeof obj.stroke === 'string' ? obj.stroke : '') || '',
-      strokeWidth: obj.strokeWidth || 0, opacity: obj.opacity ?? 1,
+      fill: appearance.fill,
+      stroke: appearance.stroke,
+      strokeWidth: appearance.strokeWidth,
+      opacity: appearance.opacity,
       fontFamily: (obj as fabric.Textbox).fontFamily || 'sans-serif',
       fontSize: (obj as fabric.Textbox).fontSize || 24,
       fontWeight: String((obj as fabric.Textbox).fontWeight || 'normal'),
@@ -65,7 +81,7 @@ export default function PropertyPanel() {
       underline: (obj as fabric.Textbox).underline || false,
       textAlign: (obj as fabric.Textbox).textAlign || 'left',
       lineHeight: (obj as fabric.Textbox).lineHeight || 1.2,
-      strokeDashArray: obj.strokeDashArray ? obj.strokeDashArray.join(',') : '',
+      strokeDashArray: appearance.strokeDashArray?.join(',') ?? '',
       rx: (obj as fabric.Rect).rx || 0, ry: (obj as fabric.Rect).ry || 0,
     });
   }, [canvas]);
@@ -88,17 +104,67 @@ export default function PropertyPanel() {
     };
   }, [canvas, readProps]);
 
-  const updateProp = (key: ObjPropKey, value: unknown) => {
+  const updateProp = <K extends ObjPropKey>(key: K, value: ObjProps[K]) => {
     if (!canvas) return;
     const obj = canvas.getActiveObject();
     if (!obj) return;
-    if (key === 'width') { obj.set({ scaleX: (value as number) / (obj.width || 1) }); }
-    else if (key === 'height') { obj.set({ scaleY: (value as number) / (obj.height || 1) }); }
+    if (key === 'width') {
+      const currentWidth = obj.getScaledWidth() || 1;
+      obj.set({ scaleX: (obj.scaleX || 1) * (value as number) / currentWidth });
+    }
+    else if (key === 'height') {
+      const currentHeight = obj.getScaledHeight() || 1;
+      obj.set({ scaleY: (obj.scaleY || 1) * (value as number) / currentHeight });
+    }
     else if (key === 'strokeDashArray') {
       const str = value as string;
-      obj.set({ strokeDashArray: str.trim() === '' ? undefined : str.split(',').map(Number) });
-    } else { obj.set({ [key]: value } as Partial<fabric.FabricObject>); }
-    obj.setCoords(); canvas.requestRenderAll(); readProps();
+      const dash = str.split(',').map((part) => Number(part.trim()));
+      if (str.trim() !== '' && dash.some((part) => !Number.isFinite(part) || part < 0)) return;
+      const targets = obj instanceof fabric.ActiveSelection ? obj.getObjects() : [obj];
+      targets.forEach((target) => applyEditorStyle(target, {
+        ...captureEditorStyle(target),
+        strokeDashArray: str.trim() === '' ? undefined : dash,
+      }));
+    } else if (key === 'fill' || key === 'stroke' || key === 'strokeWidth' || key === 'opacity') {
+      const targets = obj instanceof fabric.ActiveSelection ? obj.getObjects() : [obj];
+      targets.forEach((target) => {
+        const style = captureEditorStyle(target);
+        if (key === 'fill') style.fill = value as string;
+        if (key === 'stroke') style.stroke = value as string;
+        if (key === 'strokeWidth') style.strokeWidth = value as number;
+        if (key === 'opacity') style.opacity = value as number;
+        applyEditorStyle(target, style);
+      });
+    } else {
+      obj.set({ [key]: value } as Partial<fabric.FabricObject>);
+    }
+    obj.setCoords();
+    updateLinkedSemanticObjects(canvas);
+    canvas.requestRenderAll();
+    readProps();
+  };
+
+  const applyStyle = (style?: ReturnType<typeof loadCurrentEditorStyle>) => {
+    if (!canvas) return;
+    const active = canvas.getActiveObject();
+    if (!active) return;
+    const targets = active instanceof fabric.ActiveSelection ? active.getObjects() : [active];
+    targets.forEach((target) => {
+      applyEditorStyle(target, style ?? loadCurrentEditorStyle(styleKindForObject(target)));
+      target.setCoords();
+    });
+    canvas.requestRenderAll();
+    readProps();
+    pushHistory();
+  };
+
+  const rememberStyle = () => {
+    const active = canvas?.getActiveObject();
+    if (!active) return;
+    const source = active instanceof fabric.ActiveSelection ? active.getObjects()[0] : active;
+    if (!source) return;
+    saveCurrentEditorStyle(captureEditorStyle(source), styleKindForObject(source));
+    useEditorStore.getState().showToast(t('styleSaved'), 'success');
   };
 
   const commitChange = () => pushHistory();
@@ -117,8 +183,9 @@ export default function PropertyPanel() {
         ) : (
           <>
             <div className="prop-row">
-              <label>{t('presetSize')}</label>
+              <label htmlFor={presetId}>{t('presetSize')}</label>
               <select
+                id={presetId}
                 className="preset-select"
                 value={
                   CANVAS_PRESETS.find((p) => p.width === canvasWidth && p.height === canvasHeight)?.labelKey
@@ -176,14 +243,36 @@ export default function PropertyPanel() {
 
           <div className="prop-section">
             <div className="prop-section-title">{t('appearance')}</div>
+            <div className="style-preset-row" aria-label={t('stylePresets')}>
+              {BUILTIN_STYLE_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  className="style-swatch"
+                  style={{ background: preset.style.fill, borderColor: preset.style.stroke }}
+                  onClick={() => applyStyle(preset.style)}
+                  aria-label={`${t('stylePresets')}: ${preset.id}`}
+                  title={`${t('stylePresets')}: ${preset.id}`}
+                />
+              ))}
+              <button className="toolbar-btn style-action" onClick={rememberStyle}>{t('rememberStyle')}</button>
+              <button className="toolbar-btn style-action" onClick={() => applyStyle()}>{t('applyStyle')}</button>
+            </div>
             <ColorField label={t('fill')} value={props.fill || '#ffffff'} onChange={(value) => updateProp('fill', value)} onBlur={commitChange} />
             <ColorField label={t('strokeColor')} value={props.stroke || '#000000'} onChange={(value) => updateProp('stroke', value)} onBlur={commitChange} />
             <NumberField label={t('strokeWidth')} value={props.strokeWidth} onChange={(value) => updateProp('strokeWidth', value)} onBlur={commitChange} min={0} max={50} />
-            <PropertyField label={t('dash')}>
-              <input type="text" value={props.strokeDashArray} onChange={(e) => updateProp('strokeDashArray', e.target.value)} onBlur={commitChange} placeholder={t('dashPlaceholder')} />
-            </PropertyField>
-            <PropertyField label={t('opacity')}>
-              <input type="range" min={0} max={1} step={0.05} value={props.opacity} onChange={(e) => updateProp('opacity', Number(e.target.value))} onMouseUp={commitChange} />
+            <TextField
+              key={props.strokeDashArray}
+              label={t('dash')}
+              value={props.strokeDashArray}
+              onCommit={(value) => { updateProp('strokeDashArray', value); commitChange(); }}
+              placeholder={t('dashPlaceholder')}
+              validate={(value) => value.trim() === '' || value.split(',').every((part) => {
+                const number = Number(part.trim());
+                return part.trim() !== '' && Number.isFinite(number) && number >= 0;
+              })}
+            />
+            <PropertyField label={t('opacity')} labelFor={opacityId}>
+              <input id={opacityId} type="range" min={0} max={1} step={0.05} value={props.opacity} onChange={(e) => updateProp('opacity', Number(e.target.value))} onPointerUp={commitChange} onKeyUp={commitChange} />
               <span className="prop-value">{Math.round(props.opacity * 100)}%</span>
             </PropertyField>
             {isRect && (
@@ -195,30 +284,30 @@ export default function PropertyPanel() {
             <div className="prop-section">
               <div className="prop-section-title">{t('text')}</div>
               <div className="prop-row">
-                <label>{t('font')}</label>
-                <select value={props.fontFamily} onChange={(e) => updateProp('fontFamily', e.target.value)} onBlur={commitChange}>
+                <label htmlFor={fontId}>{t('font')}</label>
+                <select id={fontId} value={props.fontFamily} onChange={(e) => updateProp('fontFamily', e.target.value)} onBlur={commitChange}>
                   <option value="sans-serif">Sans Serif</option>
                   <option value="serif">Serif</option>
                   <option value="monospace">Monospace</option>
                   <option value="'Noto Sans JP', sans-serif">Noto Sans JP</option>
                 </select>
               </div>
-              <div className="prop-row"><label>{t('fontSize')}</label><input type="number" value={props.fontSize} onChange={(e) => updateProp('fontSize', Number(e.target.value))} onBlur={commitChange} min={8} max={200} /></div>
+              <NumberField label={t('fontSize')} value={props.fontSize} onChange={(value) => updateProp('fontSize', value)} onBlur={commitChange} min={8} max={200} />
               <div className="prop-row prop-row-buttons">
-                <button className={`prop-toggle ${props.fontWeight === 'bold' || props.fontWeight === '700' ? 'active' : ''}`} onClick={() => { updateProp('fontWeight', props.fontWeight === 'bold' || props.fontWeight === '700' ? 'normal' : 'bold'); commitChange(); }} title={t('bold')}>{t('bold')}</button>
-                <button className={`prop-toggle ${props.fontStyle === 'italic' ? 'active' : ''}`} onClick={() => { updateProp('fontStyle', props.fontStyle === 'italic' ? 'normal' : 'italic'); commitChange(); }} title={t('italic')}>{t('italic')}</button>
-                <button className={`prop-toggle ${props.underline ? 'active' : ''}`} onClick={() => { updateProp('underline', !props.underline); commitChange(); }} title={t('underline')}>{t('underline')}</button>
+                <button className={`prop-toggle ${props.fontWeight === 'bold' || props.fontWeight === '700' ? 'active' : ''}`} onClick={() => { updateProp('fontWeight', props.fontWeight === 'bold' || props.fontWeight === '700' ? 'normal' : 'bold'); commitChange(); }} title={t('bold')} aria-pressed={props.fontWeight === 'bold' || props.fontWeight === '700'}>{t('bold')}</button>
+                <button className={`prop-toggle ${props.fontStyle === 'italic' ? 'active' : ''}`} onClick={() => { updateProp('fontStyle', props.fontStyle === 'italic' ? 'normal' : 'italic'); commitChange(); }} title={t('italic')} aria-pressed={props.fontStyle === 'italic'}>{t('italic')}</button>
+                <button className={`prop-toggle ${props.underline ? 'active' : ''}`} onClick={() => { updateProp('underline', !props.underline); commitChange(); }} title={t('underline')} aria-pressed={props.underline}>{t('underline')}</button>
               </div>
               <div className="prop-row">
-                <label>{t('textAlign')}</label>
-                <select value={props.textAlign} onChange={(e) => { updateProp('textAlign', e.target.value); commitChange(); }}>
+                <label htmlFor={textAlignId}>{t('textAlign')}</label>
+                <select id={textAlignId} value={props.textAlign} onChange={(e) => { updateProp('textAlign', e.target.value); commitChange(); }}>
                   <option value="left">{t('textAlignLeft')}</option>
                   <option value="center">{t('textAlignCenter')}</option>
                   <option value="right">{t('textAlignRight')}</option>
                 </select>
               </div>
-              <div className="prop-row"><label>{t('textColor')}</label><input type="color" value={props.fill || '#333333'} onChange={(e) => updateProp('fill', e.target.value)} onBlur={commitChange} /></div>
-              <div className="prop-row"><label>{t('lineHeight')}</label><input type="number" value={props.lineHeight} onChange={(e) => updateProp('lineHeight', Number(e.target.value))} onBlur={commitChange} min={0.5} max={3} step={0.1} /></div>
+              <ColorField label={t('textColor')} value={props.fill || '#333333'} onChange={(value) => updateProp('fill', value)} onBlur={commitChange} />
+              <NumberField label={t('lineHeight')} value={props.lineHeight} onChange={(value) => updateProp('lineHeight', value)} onBlur={commitChange} min={0.5} max={3} step={0.1} />
             </div>
           )}
         </>

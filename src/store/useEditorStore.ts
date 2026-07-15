@@ -1,7 +1,13 @@
 import { create } from 'zustand';
-import type * as fabric from 'fabric';
-import type { ToolType, DrawingMode, CadUnit } from '../types';
-import { restoreCanvasObjects, serializeCanvasObjects } from '../utils/documentSerializer';
+import * as fabric from 'fabric';
+import type { CadUnit, DrawingMode, Guide, ToolType } from '../types';
+import { setDefaultCanvasCommandHistory } from '../utils/canvasCommands';
+import {
+  restoreCanvasObjects,
+  serializeCanvasSnapshot,
+  type CanvasSnapshot,
+} from '../utils/documentSerializer';
+import { historyService } from '../utils/historyService';
 import {
   applyThemeToDom,
   loadThemePreference,
@@ -11,7 +17,7 @@ import type { Theme } from '../utils/themePreference';
 import { configureCanvasForTool } from '../utils/toolActivation';
 import { createToastId, scheduleToastRemoval } from '../utils/toastScheduler';
 
-interface EditorStore {
+export interface EditorStore {
   // Tool
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
@@ -57,11 +63,19 @@ interface EditorStore {
   setSelectedObjectIds: (ids: string[]) => void;
 
   // History (Undo/Redo)
-  history: string[];
+  history: CanvasSnapshot[];
   historyIndex: number;
+  isRestoring: boolean;
+  revision: number;
   pushHistory: () => void;
-  undo: () => void;
-  redo: () => void;
+  resetHistory: (initialSnapshot?: CanvasSnapshot) => void;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
+  beginHistoryTransaction: () => void;
+  endHistoryTransaction: () => void;
+  cancelHistoryTransaction: () => void;
+  restoreEditorSettings: (snapshot: CanvasSnapshot) => void;
+  /** @deprecated Use isRestoring. Kept for existing event handlers. */
   _skipHistoryPush: boolean;
 
   // Smart guides (object-to-object snap)
@@ -71,7 +85,7 @@ interface EditorStore {
   // Rulers & Guides
   showRulers: boolean;
   toggleRulers: () => void;
-  guides: { orientation: 'h' | 'v'; position: number }[];
+  guides: Guide[];
   addGuide: (orientation: 'h' | 'v', position: number) => void;
   removeGuide: (index: number) => void;
   clearGuides: () => void;
@@ -109,137 +123,401 @@ export interface Toast {
 }
 
 const MAX_HISTORY = 50;
+const MAX_HISTORY_BYTES = 32 * 1024 * 1024;
 
-export const useEditorStore = create<EditorStore>((set, get) => ({
-  drawingMode: 'illustration',
-  setDrawingMode: (mode) => set({ drawingMode: mode }),
-  cadUnit: 'mm',
-  setCadUnit: (unit) => set({ cadUnit: unit }),
+let transactionDepth = 0;
+let transactionDirty = false;
+let historyRequestId = 0;
 
-  activeTool: 'select',
-  setActiveTool: (tool) => {
-    const { canvas } = get();
-    if (canvas) {
-      configureCanvasForTool(canvas, tool);
-    }
-    set({ activeTool: tool });
-  },
+function snapshotsEqual(left: CanvasSnapshot, right: CanvasSnapshot): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
-  canvas: null,
-  setCanvas: (canvas) => set({ canvas }),
+function trimHistory(history: CanvasSnapshot[]): CanvasSnapshot[] {
+  const sizes = history.map((snapshot) => JSON.stringify(snapshot).length * 2);
+  let totalBytes = sizes.reduce((sum, size) => sum + size, 0);
+  while (
+    history.length > 1
+    && (history.length > MAX_HISTORY || totalBytes > MAX_HISTORY_BYTES)
+  ) {
+    history.shift();
+    totalBytes -= sizes.shift() ?? 0;
+  }
+  return history;
+}
 
-  canvasWidth: 800,
-  canvasHeight: 600,
-  setCanvasSize: (w, h) => {
-    const { canvas } = get();
-    if (canvas) {
-      canvas.setDimensions({ width: w, height: h });
-    }
-    set({ canvasWidth: w, canvasHeight: h });
-  },
+function captureSnapshot(state: EditorStore): CanvasSnapshot | null {
+  if (!state.canvas) return null;
+  return serializeCanvasSnapshot({
+    canvas: state.canvas,
+    canvasWidth: state.canvasWidth,
+    canvasHeight: state.canvasHeight,
+    backgroundColor: state.backgroundColor,
+    drawingMode: state.drawingMode,
+    cadUnit: state.cadUnit,
+    scale: state.scale,
+    cadWidth: state.cadWidth,
+    cadHeight: state.cadHeight,
+    gridVisible: state.gridVisible,
+    gridSize: state.gridSize,
+    snapToGrid: state.snapToGrid,
+    snapToObjects: state.snapToObjects,
+    showRulers: state.showRulers,
+    guides: state.guides,
+    snapToGuides: state.snapToGuides,
+    orthoMode: state.orthoMode,
+  });
+}
 
-  backgroundColor: '#FFFFFF',
-  setBackgroundColor: (color) => {
-    const { canvas } = get();
-    if (canvas) {
-      canvas.backgroundColor = color;
-      canvas.requestRenderAll();
-    }
-    set({ backgroundColor: color });
-  },
+export const useEditorStore = create<EditorStore>((set, get) => {
+  const recordSettingChange = (): void => {
+    get().pushHistory();
+  };
 
-  zoom: 1,
-  setZoom: (zoom) => set({ zoom }),
+  const applySnapshotSettings = (snapshot: CanvasSnapshot): void => {
+    const state = get();
+    // Keep the store side-effect free with respect to viewport layout. The
+    // live Fabric dimensions depend on mode and display zoom (or the CAD
+    // wrapper size), so applying document dimensions here corrupts the
+    // viewport during an object-only Undo/Redo. useCadViewport reapplies the
+    // correct live layout when restoration starts/finishes.
+    set({
+      canvasWidth: snapshot.canvas.width,
+      canvasHeight: snapshot.canvas.height,
+      backgroundColor: snapshot.canvas.backgroundColor,
+      drawingMode: snapshot.drawingMode ?? state.drawingMode,
+      cadUnit: snapshot.cadUnit ?? state.cadUnit,
+      scale: snapshot.scale ?? state.scale,
+      cadWidth: snapshot.cadWidth ?? state.cadWidth,
+      cadHeight: snapshot.cadHeight ?? state.cadHeight,
+      gridVisible: snapshot.gridVisible ?? state.gridVisible,
+      gridSize: snapshot.gridSize ?? state.gridSize,
+      snapToGrid: snapshot.snapToGrid ?? state.snapToGrid,
+      snapToObjects: snapshot.snapToObjects ?? state.snapToObjects,
+      showRulers: snapshot.showRulers ?? state.showRulers,
+      guides: snapshot.guides?.map((guide) => ({ ...guide })) ?? state.guides,
+      snapToGuides: snapshot.snapToGuides ?? state.snapToGuides,
+      orthoMode: snapshot.orthoMode ?? state.orthoMode,
+      selectedObjectIds: [],
+    });
+  };
 
-  gridVisible: false,
-  toggleGrid: () => set((s) => ({ gridVisible: !s.gridVisible })),
-  gridSize: 20,
-  setGridSize: (size) => set({ gridSize: Math.max(5, size) }),
-  snapToGrid: false,
-  toggleSnap: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
+  const applyHistorySnapshot = async (
+    canvas: fabric.Canvas,
+    snapshot: CanvasSnapshot,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    await historyService.withHistorySuspended(async () => {
+      applySnapshotSettings(snapshot);
+      await restoreCanvasObjects(canvas, snapshot.objects, signal);
+      configureCanvasForTool(canvas, get().activeTool);
+    });
+  };
 
-  scale: '1:1',
-  setScale: (scale) => set({ scale }),
-
-  cadWidth: 10000,   // 10m default
-  cadHeight: 8000,   // 8m default
-  setCadSize: (w, h) => set({ cadWidth: w, cadHeight: h }),
-
-  selectedObjectIds: [],
-  setSelectedObjectIds: (ids) => set({ selectedObjectIds: ids }),
-
-  history: [],
-  historyIndex: -1,
-  _skipHistoryPush: false,
-  pushHistory: () => {
-    const { canvas, history, historyIndex, _skipHistoryPush } = get();
-    if (!canvas || _skipHistoryPush) return;
-    const json = serializeCanvasObjects(canvas);
-    const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push(json);
-    if (newHistory.length > MAX_HISTORY) newHistory.shift();
-    set({ history: newHistory, historyIndex: newHistory.length - 1 });
-  },
-  undo: () => {
+  const restoreHistoryIndex = async (targetIndex: number, force = false): Promise<void> => {
     const { canvas, history, historyIndex } = get();
-    if (!canvas || historyIndex <= 0) return;
-    const newIndex = historyIndex - 1;
-    set({ _skipHistoryPush: true, historyIndex: newIndex });
-    restoreCanvasObjects(canvas, history[newIndex]).then(() => {
-      set({ _skipHistoryPush: false });
-    });
-  },
-  redo: () => {
-    const { canvas, history, historyIndex } = get();
-    if (!canvas || historyIndex >= history.length - 1) return;
-    const newIndex = historyIndex + 1;
-    set({ _skipHistoryPush: true, historyIndex: newIndex });
-    restoreCanvasObjects(canvas, history[newIndex]).then(() => {
-      set({ _skipHistoryPush: false });
-    });
-  },
+    if (
+      !canvas
+      || targetIndex < 0
+      || targetIndex >= history.length
+      || (!force && targetIndex === historyIndex)
+    ) {
+      return;
+    }
 
-  snapToObjects: false,
-  toggleSnapToObjects: () => set((s) => ({ snapToObjects: !s.snapToObjects })),
+    const previousIndex = historyIndex;
+    const previousSnapshot = history[previousIndex];
+    const targetSnapshot = history[targetIndex];
+    if (!previousSnapshot || !targetSnapshot) return;
 
-  showRulers: false,
-  toggleRulers: () => set((s) => ({ showRulers: !s.showRulers })),
-  guides: [],
-  addGuide: (orientation, position) =>
-    set((s) => ({ guides: [...s.guides, { orientation, position }] })),
-  removeGuide: (index) =>
-    set((s) => ({ guides: s.guides.filter((_, i) => i !== index) })),
-  clearGuides: () => set({ guides: [] }),
-  snapToGuides: false,
-  toggleSnapToGuides: () => set((s) => ({ snapToGuides: !s.snapToGuides })),
+    const requestId = ++historyRequestId;
+    set({ historyIndex: targetIndex });
 
-  clipboard: null,
-  setClipboard: (objects) => set({ clipboard: objects }),
+    try {
+      const result = await historyService.enqueue(async (signal) => {
+        try {
+          await applyHistorySnapshot(canvas, targetSnapshot, signal);
+        } catch (error) {
+          // A genuine load failure can leave Fabric partially mutated. Restore
+          // the last known-good snapshot before surfacing the error.
+          if (!signal.aborted) {
+            await applyHistorySnapshot(canvas, previousSnapshot, signal);
+          }
+          throw error;
+        }
+      });
+      if (result.status === 'completed') {
+        set((state) => ({ revision: state.revision + 1 }));
+      }
+    } catch {
+      if (requestId === historyRequestId) {
+        set({ historyIndex: previousIndex });
+      }
+      get().showToast('Undo/Redo の復元に失敗しました。', 'error');
+    }
+  };
 
-  orthoMode: false,
-  toggleOrtho: () => set((s) => ({ orthoMode: !s.orthoMode })),
+  return {
+    drawingMode: 'illustration',
+    setDrawingMode: (mode) => {
+      if (mode === get().drawingMode) return;
+      set({ drawingMode: mode });
+      recordSettingChange();
+    },
+    cadUnit: 'mm',
+    setCadUnit: (unit) => {
+      if (unit === get().cadUnit) return;
+      set({ cadUnit: unit });
+      recordSettingChange();
+    },
 
-  cursorPos: null,
-  setCursorPos: (pos) => set({ cursorPos: pos }),
+    activeTool: 'select',
+    setActiveTool: (tool) => {
+      const { canvas } = get();
+      if (canvas) configureCanvasForTool(canvas, tool);
+      set({ activeTool: tool });
+    },
 
-  theme: loadThemePreference(),
-  toggleTheme: () => {
-    const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
-    saveThemePreference(next);
-    applyThemeToDom(next);
-    set({ theme: next });
-  },
+    canvas: null,
+    setCanvas: (canvas) => set({ canvas }),
 
-  toasts: [],
-  showToast: (message, type = 'info') => {
-    const id = createToastId();
-    set((s) => ({ toasts: [...s.toasts, { id, message, type }] }));
-    scheduleToastRemoval(() => {
-      set((s) => ({ toasts: s.toasts.filter((tt) => tt.id !== id) }));
-    });
-  },
-  removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((tt) => tt.id !== id) })),
-}));
+    canvasWidth: 800,
+    canvasHeight: 600,
+    setCanvasSize: (w, h) => {
+      if (w === get().canvasWidth && h === get().canvasHeight) return;
+      set({ canvasWidth: w, canvasHeight: h });
+      recordSettingChange();
+    },
+
+    backgroundColor: '#FFFFFF',
+    setBackgroundColor: (color) => {
+      if (color === get().backgroundColor) return;
+      set({ backgroundColor: color });
+      recordSettingChange();
+    },
+
+    zoom: 1,
+    setZoom: (zoom) => set({ zoom }),
+
+    gridVisible: false,
+    toggleGrid: () => {
+      set((state) => ({ gridVisible: !state.gridVisible }));
+      recordSettingChange();
+    },
+    gridSize: 20,
+    setGridSize: (size) => {
+      const next = Math.max(5, size);
+      if (next === get().gridSize) return;
+      set({ gridSize: next });
+      recordSettingChange();
+    },
+    snapToGrid: false,
+    toggleSnap: () => {
+      set((state) => ({ snapToGrid: !state.snapToGrid }));
+      recordSettingChange();
+    },
+
+    scale: '1:1',
+    setScale: (scale) => {
+      if (scale === get().scale) return;
+      set({ scale });
+      recordSettingChange();
+    },
+
+    cadWidth: 10000,
+    cadHeight: 8000,
+    setCadSize: (w, h) => {
+      if (w === get().cadWidth && h === get().cadHeight) return;
+      set({ cadWidth: w, cadHeight: h });
+      recordSettingChange();
+    },
+
+    selectedObjectIds: [],
+    setSelectedObjectIds: (ids) => set({ selectedObjectIds: ids }),
+
+    history: [],
+    historyIndex: -1,
+    isRestoring: false,
+    revision: 0,
+    _skipHistoryPush: false,
+    pushHistory: () => {
+      const state = get();
+      if (
+        !state.canvas
+        || state._skipHistoryPush
+        || historyService.isHistorySuspended
+      ) {
+        return;
+      }
+      if (transactionDepth > 0) {
+        transactionDirty = true;
+        return;
+      }
+
+      const snapshot = captureSnapshot(state);
+      if (!snapshot) return;
+      const current = state.history[state.historyIndex];
+      if (current && snapshotsEqual(current, snapshot)) return;
+
+      const history = state.history.slice(0, state.historyIndex + 1);
+      history.push(snapshot);
+      trimHistory(history);
+      set({
+        history,
+        historyIndex: history.length - 1,
+        revision: state.revision + 1,
+      });
+    },
+    resetHistory: (initialSnapshot) => {
+      historyRequestId += 1;
+      historyService.invalidate();
+      transactionDepth = 0;
+      transactionDirty = false;
+      const snapshot = initialSnapshot ?? captureSnapshot(get());
+      set((state) => ({
+        history: snapshot ? [snapshot] : [],
+        historyIndex: snapshot ? 0 : -1,
+        selectedObjectIds: [],
+        revision: state.revision + 1,
+      }));
+    },
+    undo: () => {
+      if (transactionDepth > 0) {
+        // A gesture can mutate the live canvas before its final history entry
+        // is committed (held arrow keys and Alt-drag are examples). Undo must
+        // cancel that gesture back to the current baseline instead of skipping
+        // over the baseline to an older history entry.
+        transactionDepth = 0;
+        transactionDirty = false;
+        return restoreHistoryIndex(get().historyIndex, true);
+      }
+      return restoreHistoryIndex(get().historyIndex - 1);
+    },
+    redo: () => {
+      if (transactionDepth > 0) {
+        transactionDepth = 0;
+        transactionDirty = false;
+        return restoreHistoryIndex(get().historyIndex, true);
+      }
+      return restoreHistoryIndex(get().historyIndex + 1);
+    },
+    beginHistoryTransaction: () => {
+      transactionDepth += 1;
+    },
+    endHistoryTransaction: () => {
+      if (transactionDepth === 0) return;
+      transactionDepth -= 1;
+      if (transactionDepth === 0 && transactionDirty) {
+        transactionDirty = false;
+        get().pushHistory();
+      }
+    },
+    cancelHistoryTransaction: () => {
+      transactionDepth = 0;
+      transactionDirty = false;
+    },
+    restoreEditorSettings: (snapshot) => applySnapshotSettings(snapshot),
+
+    snapToObjects: false,
+    toggleSnapToObjects: () => {
+      set((state) => ({ snapToObjects: !state.snapToObjects }));
+      recordSettingChange();
+    },
+
+    showRulers: false,
+    toggleRulers: () => {
+      set((state) => ({ showRulers: !state.showRulers }));
+      recordSettingChange();
+    },
+    guides: [],
+    addGuide: (orientation, position) => {
+      set((state) => ({ guides: [...state.guides, { orientation, position }] }));
+      recordSettingChange();
+    },
+    removeGuide: (index) => {
+      if (!get().guides[index]) return;
+      set((state) => ({ guides: state.guides.filter((_, itemIndex) => itemIndex !== index) }));
+      recordSettingChange();
+    },
+    clearGuides: () => {
+      if (get().guides.length === 0) return;
+      set({ guides: [] });
+      recordSettingChange();
+    },
+    snapToGuides: false,
+    toggleSnapToGuides: () => {
+      set((state) => ({ snapToGuides: !state.snapToGuides }));
+      recordSettingChange();
+    },
+
+    clipboard: null,
+    setClipboard: (objects) => set({ clipboard: objects }),
+
+    orthoMode: false,
+    toggleOrtho: () => {
+      set((state) => ({ orthoMode: !state.orthoMode }));
+      recordSettingChange();
+    },
+
+    cursorPos: null,
+    setCursorPos: (pos) => set({ cursorPos: pos }),
+
+    theme: loadThemePreference(),
+    toggleTheme: () => {
+      const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
+      saveThemePreference(next);
+      applyThemeToDom(next);
+      set({ theme: next });
+    },
+
+    toasts: [],
+    showToast: (message, type = 'info') => {
+      const id = createToastId();
+      set((state) => ({ toasts: [...state.toasts, { id, message, type }] }));
+      scheduleToastRemoval(() => {
+        set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) }));
+      });
+    },
+    removeToast: (id) => {
+      set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) }));
+    },
+  };
+});
+
+export function captureCurrentEditorSnapshot(): CanvasSnapshot | null {
+  return captureSnapshot(useEditorStore.getState());
+}
+
+setDefaultCanvasCommandHistory(useEditorStore.getState().pushHistory);
+
+historyService.setRestoringListener((isRestoring) => {
+  const state = useEditorStore.getState();
+  if (state.canvas) {
+    state.canvas.upperCanvasEl.style.pointerEvents = isRestoring ? 'none' : '';
+    if (isRestoring) {
+      state.cancelHistoryTransaction();
+      const active = state.canvas.getActiveObject();
+      if (active instanceof fabric.IText && active.isEditing) active.exitEditing();
+      state.canvas.discardActiveObject();
+      state.canvas.selection = false;
+      state.canvas.requestRenderAll();
+    } else {
+      configureCanvasForTool(state.canvas, state.activeTool);
+    }
+  }
+  useEditorStore.setState({
+    isRestoring,
+    _skipHistoryPush: isRestoring,
+  });
+});
+
+historyService.setDocumentRestoredListener((snapshot) => {
+  const validatedSnapshot = snapshot as CanvasSnapshot;
+  const state = useEditorStore.getState();
+  state.restoreEditorSettings(validatedSnapshot);
+  if (state.canvas) configureCanvasForTool(state.canvas, state.activeTool);
+  state.resetHistory();
+});
 
 // Apply persisted theme to the document on load
 applyThemeToDom(useEditorStore.getState().theme);

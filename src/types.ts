@@ -14,6 +14,7 @@ export type ToolType =
   | 'pencil'
   | 'measure'
   | 'dimension'
+  | 'connector'
   | 'wall'
   | 'column'
   | 'latex'
@@ -130,6 +131,16 @@ export const PAPER_SIZES: PaperSize[] = [
   { label: 'A4', width: 210, height: 297 },
 ];
 
+export interface Guide {
+  orientation: 'h' | 'v';
+  position: number;
+}
+
+/** Validated, structured Fabric canvas JSON used by schema version 2+. */
+export interface SerializedCanvasData extends Record<string, unknown> {
+  objects: unknown[];
+}
+
 export interface DocumentData {
   documentId: string;
   canvas: {
@@ -137,7 +148,7 @@ export interface DocumentData {
     height: number;
     backgroundColor: string;
   };
-  objects: string; // Fabric.js JSON string
+  objects: SerializedCanvasData;
   version: number;
   // CAD mode metadata (for external program interop)
   drawingMode?: DrawingMode;
@@ -145,4 +156,12 @@ export interface DocumentData {
   scale?: string;
   cadWidth?: number;   // CAD drawing width in mm (1:1 mode)
   cadHeight?: number;  // CAD drawing height in mm (1:1 mode)
+  gridVisible?: boolean;
+  gridSize?: number;
+  snapToGrid?: boolean;
+  snapToObjects?: boolean;
+  showRulers?: boolean;
+  guides?: Guide[];
+  snapToGuides?: boolean;
+  orthoMode?: boolean;
 }

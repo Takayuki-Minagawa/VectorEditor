@@ -1,8 +1,17 @@
 import * as fabric from 'fabric';
-import type { ToolType } from '../types';
+import type { CadUnit, ToolType } from '../types';
+import { TOOL_DEFINITIONS } from '../domain/tools';
 import { generateObjectId } from './objectIds';
+import type { ConnectorRoute, SemanticAnchor } from './fabricObjectMetadata';
+import { setFabricMetadataValues } from './fabricObjectMetadata';
+import { createSemanticConnector, createSemanticDimension } from './semanticObjects';
+import { loadCurrentEditorStyle } from './stylePresets';
 
-export function applyObjectDefaults(obj: fabric.FabricObject, id: string): void {
+export function applyObjectDefaults(
+  obj: fabric.FabricObject,
+  id: string,
+  objectKind?: string,
+): void {
   obj.set({
     id,
     strokeUniform: true,
@@ -14,6 +23,15 @@ export function applyObjectDefaults(obj: fabric.FabricObject, id: string): void 
     borderScaleFactor: 1.5,
     padding: 4,
   } as Partial<fabric.FabricObject>);
+  setFabricMetadataValues(obj, { id, objectKind });
+}
+
+export interface ShapeSemanticOptions {
+  start?: SemanticAnchor;
+  end?: SemanticAnchor;
+  connectorRoute?: ConnectorRoute;
+  dimensionPrecision?: number;
+  dimensionUnit?: CadUnit;
 }
 
 export function createShapeOnDrag(
@@ -23,7 +41,11 @@ export function createShapeOnDrag(
   endX: number,
   endY: number,
   getDimensionLabel: (distance: number) => string,
+  semanticOptions: ShapeSemanticOptions = {},
 ): fabric.FabricObject | null {
+  const style = loadCurrentEditorStyle(
+    ['line', 'arrow', 'dimension', 'connector'].includes(tool) ? 'line' : 'shape',
+  );
   const left = Math.min(startX, endX);
   const top = Math.min(startY, endY);
   const width = Math.abs(endX - startX);
@@ -33,10 +55,11 @@ export function createShapeOnDrag(
   const common = {
     left,
     top,
-    fill: '#D9EAF7',
-    stroke: '#1F4E79',
-    strokeWidth: 2,
-    opacity: 1,
+    fill: style.fill,
+    stroke: style.stroke,
+    strokeWidth: style.strokeWidth,
+    strokeDashArray: style.strokeDashArray ? [...style.strokeDashArray] : undefined,
+    opacity: style.opacity,
   };
 
   let obj: fabric.FabricObject;
@@ -82,8 +105,10 @@ export function createShapeOnDrag(
       break;
     case 'line':
       obj = new fabric.Line([startX, startY, endX, endY], {
-        stroke: '#1F4E79',
-        strokeWidth: 2,
+        stroke: style.stroke,
+        strokeWidth: style.strokeWidth,
+        strokeDashArray: style.strokeDashArray ? [...style.strokeDashArray] : undefined,
+        opacity: style.opacity,
         fill: '',
       });
       break;
@@ -91,8 +116,10 @@ export function createShapeOnDrag(
       const angle = Math.atan2(endY - startY, endX - startX);
       const headLen = 14;
       const line = new fabric.Line([startX, startY, endX, endY], {
-        stroke: '#1F4E79',
-        strokeWidth: 2,
+        stroke: style.stroke,
+        strokeWidth: style.strokeWidth,
+        strokeDashArray: style.strokeDashArray ? [...style.strokeDashArray] : undefined,
+        opacity: style.opacity,
         fill: '',
       });
       const headPoints = [
@@ -107,9 +134,10 @@ export function createShapeOnDrag(
         },
       ];
       const head = new fabric.Polygon(headPoints, {
-        fill: '#1F4E79',
-        stroke: '#1F4E79',
-        strokeWidth: 1,
+        fill: style.stroke,
+        stroke: style.stroke,
+        strokeWidth: Math.max(1, style.strokeWidth / 2),
+        opacity: style.opacity,
       });
       obj = new fabric.Group([line, head]);
       break;
@@ -120,60 +148,38 @@ export function createShapeOnDrag(
         top,
         width: Math.max(width, 4),
         height: Math.max(height, 4),
-        fill: '#555555',
-        stroke: '#333333',
-        strokeWidth: 1,
-        opacity: 1,
+        fill: style.fill,
+        stroke: style.stroke,
+        strokeWidth: style.strokeWidth,
+        strokeDashArray: style.strokeDashArray ? [...style.strokeDashArray] : undefined,
+        opacity: style.opacity,
       });
       break;
     case 'dimension': {
-      const dx = endX - startX;
-      const dy = endY - startY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 5) return null;
-
-      const mainLine = new fabric.Line([startX, startY, endX, endY], {
-        stroke: '#333333',
-        strokeWidth: 1,
-        fill: '',
-      });
-
-      const ang = Math.atan2(dy, dx);
-      const perpAng = ang + Math.PI / 2;
-      const tickLen = 6;
-      const tick1 = new fabric.Line([
-        startX + tickLen * Math.cos(perpAng),
-        startY + tickLen * Math.sin(perpAng),
-        startX - tickLen * Math.cos(perpAng),
-        startY - tickLen * Math.sin(perpAng),
-      ], { stroke: '#333333', strokeWidth: 1, fill: '' });
-
-      const tick2 = new fabric.Line([
-        endX + tickLen * Math.cos(perpAng),
-        endY + tickLen * Math.sin(perpAng),
-        endX - tickLen * Math.cos(perpAng),
-        endY - tickLen * Math.sin(perpAng),
-      ], { stroke: '#333333', strokeWidth: 1, fill: '' });
-
-      const midX = (startX + endX) / 2;
-      const midY = (startY + endY) / 2;
-      const label = new fabric.Text(getDimensionLabel(dist), {
-        left: midX,
-        top: midY - 14,
-        fontSize: 12,
-        fontFamily: 'sans-serif',
-        fill: '#333333',
-        originX: 'center',
-        originY: 'bottom',
-      });
-
-      obj = new fabric.Group([mainLine, tick1, tick2, label]);
+      const dimension = createSemanticDimension({
+        start: semanticOptions.start ?? { x: startX, y: startY },
+        end: semanticOptions.end ?? { x: endX, y: endY },
+        precision: semanticOptions.dimensionPrecision,
+        unit: semanticOptions.dimensionUnit,
+      }, getDimensionLabel, style);
+      if (!dimension) return null;
+      obj = dimension;
+      break;
+    }
+    case 'connector': {
+      const connector = createSemanticConnector({
+        from: semanticOptions.start ?? { x: startX, y: startY },
+        to: semanticOptions.end ?? { x: endX, y: endY },
+        route: semanticOptions.connectorRoute ?? 'straight',
+      }, style);
+      if (!connector) return null;
+      obj = connector;
       break;
     }
     default:
       return null;
   }
 
-  applyObjectDefaults(obj, id);
+  applyObjectDefaults(obj, id, TOOL_DEFINITIONS[tool].objectKind);
   return obj;
 }

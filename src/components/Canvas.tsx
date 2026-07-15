@@ -4,15 +4,33 @@ import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import { mmToUnit, unitToMm, formatReal } from '../types';
 import type { ToolType } from '../types';
+import { TOOL_DEFINITIONS } from '../domain/tools';
 import {
   ensureObjectId,
   generateObjectId,
-  reassignObjectIdsRecursive,
+  reassignObjectIdsAndReferences,
 } from '../utils/objectIds';
+import { releaseActiveSelectionObjects } from '../utils/fabricObjectTree';
 import { disposeAll } from '../utils/disposers';
+import { createAsyncCanvasMutationGuard } from '../utils/canvasCommands';
 import { applyOrtho, ORTHO_TOOLS, snapVal } from '../utils/drawingGeometry';
-import { applyObjectDefaults as applyDefaults, createShapeOnDrag } from '../utils/shapeFactory';
+import {
+  applyObjectDefaults as applyDefaults,
+  createShapeOnDrag,
+  type ShapeSemanticOptions,
+} from '../utils/shapeFactory';
 import { useCadViewport } from '../hooks/useCadViewport';
+import { useDrawingSession } from '../hooks/useDrawingSession';
+import { useRafCursorPosition } from '../hooks/useRafCursorPosition';
+import {
+  findCadSnap,
+  snapCandidateToAnchor,
+  type CadSnapCandidate,
+} from '../utils/cadSnapping';
+import type { SemanticAnchor } from '../utils/fabricObjectMetadata';
+import { setFabricMetadataValues } from '../utils/fabricObjectMetadata';
+import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
+import { applyEditorStyle, loadCurrentEditorStyle } from '../utils/stylePresets';
 import LatexDialog from './LatexDialog';
 import Ruler, { RulerCorner } from './Rulers';
 import StretchDialog from './StretchDialog';
@@ -24,25 +42,15 @@ export default function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
-  const isDrawing = useRef(false);
-  const drawStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const currentShape = useRef<fabric.FabricObject | null>(null);
-  const polygonPoints = useRef<{ x: number; y: number }[]>([]);
-  const polygonLines = useRef<fabric.Line[]>([]);
-  const lastCursor = useRef<{ x: number; y: number } | null>(null);
-
-  const {
-    setCanvas,
-    canvas: storeCanvas,
-    canvasWidth,
-    canvasHeight,
-    backgroundColor,
-    zoom,
-    gridVisible,
-    pushHistory,
-    setSelectedObjectIds,
-  } = useEditorStore();
-
+  const setCanvas = useEditorStore((s) => s.setCanvas);
+  const storeCanvas = useEditorStore((s) => s.canvas);
+  const canvasWidth = useEditorStore((s) => s.canvasWidth);
+  const canvasHeight = useEditorStore((s) => s.canvasHeight);
+  const backgroundColor = useEditorStore((s) => s.backgroundColor);
+  const zoom = useEditorStore((s) => s.zoom);
+  const gridVisible = useEditorStore((s) => s.gridVisible);
+  const pushHistory = useEditorStore((s) => s.pushHistory);
+  const setSelectedObjectIds = useEditorStore((s) => s.setSelectedObjectIds);
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
   const gridSize = useEditorStore((s) => s.gridSize);
@@ -55,9 +63,10 @@ export default function Canvas() {
 
   // Smart guide lines to render (set during object:moving)
   const smartGuideLines = useRef<{ orientation: 'h' | 'v'; position: number }[]>([]);
+  const osnapMarker = useRef<CadSnapCandidate | null>(null);
   const [measureResult, setMeasureResult] = useState<MeasureResult | null>(null);
-  const measureShape = useRef<fabric.Rect | null>(null);
   const [latexPlacement, setLatexPlacement] = useState<{ x: number; y: number } | null>(null);
+  const latexOperationToken = useRef(0);
   // Wrapper element exposed as state so rulers receive it without reading a ref during render
   const [wrapperEl, setWrapperEl] = useState<HTMLDivElement | null>(null);
   const setWrapperRef = useCallback((el: HTMLDivElement | null) => {
@@ -66,28 +75,85 @@ export default function Canvas() {
   }, []);
 
   // Stretch tool state
-  const stretchPreview = useRef<fabric.Rect | null>(null);
   const [stretchBox, setStretchBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
-  const [stretchDx, setStretchDx] = useState(0);
-  const [stretchDy, setStretchDy] = useState(0);
 
-  const { isPanning, lastPanPoint, spacePressed } = useCadViewport({
+  const {
+    isPanning,
+    lastPanPoint,
+    spacePressed,
+    viewport,
+    notifyViewportChange,
+  } = useCadViewport({
     canvas: storeCanvas,
     wrapperRef,
     drawingMode,
     zoom,
     canvasWidth,
     canvasHeight,
+    backgroundColor,
     cadWidth,
     cadHeight,
     gridVisible,
     gridSize,
   });
 
+  const drawingSession = useDrawingSession(storeCanvas);
+  const {
+    sessionRef,
+    startDragging,
+    startPolyline,
+    startMeasuring,
+    startStretching,
+    startLatexPlacement,
+    setPreview,
+    finishSession,
+    cancelSession,
+    renderPreview,
+  } = drawingSession;
+  const { scheduleCursorPosition, clearCursorPosition } = useRafCursorPosition();
+  const previousTool = useRef(activeTool);
+
+  useEffect(() => useEditorStore.subscribe((state, previous) => {
+    if (state.activeTool !== previous.activeTool && state.activeTool !== 'latex') {
+      latexOperationToken.current += 1;
+      setLatexPlacement(null);
+    }
+  }), []);
+
+  useEffect(() => {
+    if (previousTool.current === activeTool) return;
+    cancelSession();
+    if (fabricRef.current) fabricRef.current.selection = activeTool === 'select';
+    osnapMarker.current = null;
+    if (activeTool !== 'latex') {
+      latexOperationToken.current += 1;
+    }
+    previousTool.current = activeTool;
+  }, [activeTool, cancelSession]);
+
   const snap = useCallback(
     (v: number) => (snapToGrid ? snapVal(v, gridSize) : v),
     [snapToGrid, gridSize],
   );
+
+  const resolveDrawingPoint = useCallback((
+    canvas: fabric.Canvas,
+    rawPoint: { x: number; y: number },
+    allowObjectSnap = true,
+  ): { point: { x: number; y: number }; anchor: SemanticAnchor } => {
+    if (drawingMode === 'cad' && allowObjectSnap) {
+      const candidate = findCadSnap(canvas.getObjects(), rawPoint, 10 / canvas.getZoom());
+      osnapMarker.current = candidate;
+      if (candidate) {
+        return { point: candidate.point, anchor: snapCandidateToAnchor(candidate) };
+      }
+    } else {
+      osnapMarker.current = null;
+    }
+
+    const point = { x: snap(rawPoint.x), y: snap(rawPoint.y) };
+    return { point, anchor: { x: point.x, y: point.y } };
+  }, [drawingMode, snap]);
 
   const finishDrawing = useCallback(
     (obj: fabric.FabricObject) => {
@@ -110,8 +176,33 @@ export default function Canvas() {
   }, []);
 
   const createDraggedShape = useCallback(
-    (tool: ToolType, startX: number, startY: number, endX: number, endY: number) =>
-      createShapeOnDrag(tool, startX, startY, endX, endY, getDimensionLabel),
+    (
+      tool: ToolType,
+      startX: number,
+      startY: number,
+      endX: number,
+      endY: number,
+      semanticOptions?: ShapeSemanticOptions,
+    ) => {
+      const state = useEditorStore.getState();
+      const dimensionUnit = tool === 'dimension' && state.drawingMode === 'cad'
+        ? state.cadUnit
+        : undefined;
+      const dimensionPrecision = dimensionUnit === 'm' ? 3 : dimensionUnit === 'cm' ? 1 : 0;
+      return createShapeOnDrag(
+        tool,
+        startX,
+        startY,
+        endX,
+        endY,
+        getDimensionLabel,
+        {
+          ...semanticOptions,
+          dimensionUnit,
+          dimensionPrecision: tool === 'dimension' ? dimensionPrecision : undefined,
+        },
+      );
+    },
     [getDimensionLabel],
   );
 
@@ -143,11 +234,12 @@ export default function Canvas() {
     setCanvas(canvas);
 
     // Initial history
-    setTimeout(() => {
+    const historyTimer = window.setTimeout(() => {
       useEditorStore.getState().pushHistory();
     }, 100);
 
     return () => {
+      window.clearTimeout(historyTimer);
       canvas.dispose();
       fabricRef.current = null;
       setCanvas(null);
@@ -167,38 +259,111 @@ export default function Canvas() {
 
     const clearSelection = () => setSelectedObjectIds([]);
 
-    // Push history on object modification
-    const handleObjectModified = () => pushHistory();
+    // Keep linked dimensions/connectors current before committing history.
+    const handleObjectModified = (opt: { target?: fabric.FabricObject }) => {
+      const changedId = opt.target
+        && !(opt.target instanceof fabric.Group || opt.target instanceof fabric.ActiveSelection)
+        ? ensureObjectId(opt.target)
+        : undefined;
+      updateLinkedSemanticObjects(canvas, getDimensionLabel, changedId);
+      pushHistory();
+    };
 
     // Freehand pencil: assign id and record history when a stroke is finished
     const handlePathCreated = (opt: { path?: fabric.FabricObject }) => {
       const path = opt.path as fabric.FabricObject | undefined;
       if (!path) return;
       path.set({ id: generateObjectId('pencil') } as Partial<fabric.FabricObject>);
+      setFabricMetadataValues(path, {
+        id: (path as fabric.FabricObject & { id: string }).id,
+        objectKind: TOOL_DEFINITIONS.pencil.objectKind,
+      });
       pushHistory();
     };
 
     // Alt+drag to duplicate
-    let altClone: fabric.FabricObject | null = null;
+    let altClonePreviews: Array<{
+      object: fabric.FabricObject;
+      opacity: number;
+    }> = [];
+    let cloneRequested = false;
+    let cloneGeneration = 0;
+    let dragActive = false;
+    let altHistoryTransactionActive = false;
+    let altCloneCanCommit: (() => boolean) | null = null;
+
+    const beginAltHistoryTransaction = () => {
+      if (altHistoryTransactionActive) return;
+      useEditorStore.getState().beginHistoryTransaction();
+      altHistoryTransactionActive = true;
+    };
+
+    const finishAltCloneGesture = () => {
+      const hadClone = altClonePreviews.length > 0;
+      const canCommit = altCloneCanCommit?.() ?? true;
+      if (!canCommit) {
+        if (!canvas.destroyed && !canvas.disposed) {
+          canvas.remove(...altClonePreviews.map(({ object }) => object));
+        }
+        altClonePreviews.forEach(({ object }) => object.dispose());
+        altClonePreviews = [];
+      }
+      altClonePreviews.forEach(({ object, opacity }) => {
+        object.set({ opacity });
+        object.setCoords();
+      });
+      altClonePreviews = [];
+      altCloneCanCommit = null;
+      if (hadClone && canCommit && !canvas.destroyed && !canvas.disposed) {
+        canvas.requestRenderAll();
+        // This marks the open history transaction dirty after preview opacity
+        // has been restored, so only the final clone state is committed.
+        pushHistory();
+      }
+      if (altHistoryTransactionActive) {
+        useEditorStore.getState().endHistoryTransaction();
+        altHistoryTransactionActive = false;
+      }
+    };
+
     const handleAltCloneMoving = (opt: fabric.BasicTransformEvent & { target: fabric.FabricObject }) => {
-      if (opt.e.altKey && !altClone) {
+      dragActive = true;
+      if (opt.e.altKey && altClonePreviews.length === 0 && !cloneRequested) {
         const original = opt.target;
         if (!original) return;
+        beginAltHistoryTransaction();
+        cloneRequested = true;
+        const generation = cloneGeneration;
+        const clonePosition = { left: original.left, top: original.top };
+        const canCommit = createAsyncCanvasMutationGuard(canvas);
+        altCloneCanCommit = canCommit;
         original.clone().then((cloned: fabric.FabricObject) => {
-          reassignObjectIdsRecursive(cloned);
-          cloned.set({ left: original.left, top: original.top, opacity: 0.5 });
-          canvas.add(cloned);
-          altClone = cloned;
+          if (!dragActive || generation !== cloneGeneration || !canCommit()) {
+            cloned.dispose();
+            return;
+          }
+          cloned.set(clonePosition);
+          const clones = releaseActiveSelectionObjects(cloned);
+          reassignObjectIdsAndReferences(clones);
+          altClonePreviews = clones.map((object) => {
+            const opacity = object.opacity ?? 1;
+            object.set({ opacity: opacity * 0.5 });
+            object.setCoords();
+            return { object, opacity };
+          });
+          canvas.add(...clones);
+        }).catch(() => {
+          // A failed clone must not leave the gesture permanently armed.
+        }).finally(() => {
+          if (generation === cloneGeneration) cloneRequested = false;
         });
       }
     };
     const handleAltCloneMouseUp = () => {
-      if (altClone) {
-        altClone.set({ opacity: altClone.opacity === 0.5 ? 1 : altClone.opacity });
-        altClone = null;
-        canvas.requestRenderAll();
-        pushHistory();
-      }
+      dragActive = false;
+      cloneGeneration += 1;
+      cloneRequested = false;
+      finishAltCloneGesture();
     };
 
     // Shift: constrain rotation to 15-degree steps
@@ -209,7 +374,7 @@ export default function Canvas() {
       }
     };
 
-    return disposeAll([
+    const disposeEvents = disposeAll([
       canvas.on('selection:created', updateSelection),
       canvas.on('selection:updated', updateSelection),
       canvas.on('selection:cleared', clearSelection),
@@ -219,7 +384,17 @@ export default function Canvas() {
       canvas.on('mouse:up', handleAltCloneMouseUp),
       canvas.on('object:rotating', handleObjectRotating),
     ]);
-  }, [setSelectedObjectIds, pushHistory]);
+    return () => {
+      dragActive = false;
+      cloneGeneration += 1;
+      if (canvas.destroyed) {
+        if (altHistoryTransactionActive) useEditorStore.getState().cancelHistoryTransaction();
+      } else {
+        finishAltCloneGesture();
+      }
+      disposeEvents();
+    };
+  }, [setSelectedObjectIds, pushHistory, getDimensionLabel]);
 
   // Grid snap on object moving
   useEffect(() => {
@@ -244,11 +419,12 @@ export default function Canvas() {
     const canvas = fabricRef.current;
     if (!canvas) return;
 
-    const SNAP_THRESHOLD = 5;
+    const SNAP_THRESHOLD_PX = 6;
 
     const handleMoving = (opt: fabric.BasicTransformEvent & { target: fabric.FabricObject }) => {
       const target = opt.target as fabric.FabricObject | undefined;
       if (!target) return;
+      const snapThreshold = SNAP_THRESHOLD_PX / Math.max(canvas.getZoom(), 0.001);
 
       const { snapToObjects: doObj, snapToGuides: doGuide, guides: guideList } = useEditorStore.getState();
       if (!doObj && !doGuide) {
@@ -292,7 +468,7 @@ export default function Canvas() {
               [tCenterX, oCenterX], [tCenterX, oLeft], [tCenterX, oRight],
             ];
             for (const [tVal, oVal] of xPairs) {
-              if (Math.abs(tVal - oVal) < SNAP_THRESHOLD) {
+              if (Math.abs(tVal - oVal) < snapThreshold) {
                 snapDx = oVal - tVal;
                 newGuides.push({ orientation: 'v', position: oVal });
                 snappedX = true;
@@ -309,7 +485,7 @@ export default function Canvas() {
               [tCenterY, oCenterY], [tCenterY, oTop], [tCenterY, oBottom],
             ];
             for (const [tVal, oVal] of yPairs) {
-              if (Math.abs(tVal - oVal) < SNAP_THRESHOLD) {
+              if (Math.abs(tVal - oVal) < snapThreshold) {
                 snapDy = oVal - tVal;
                 newGuides.push({ orientation: 'h', position: oVal });
                 snappedY = true;
@@ -328,7 +504,7 @@ export default function Canvas() {
           if (g.orientation === 'v' && !snappedX) {
             const xEdges = [tLeft, tRight, tCenterX];
             for (const edge of xEdges) {
-              if (Math.abs(edge - g.position) < SNAP_THRESHOLD) {
+              if (Math.abs(edge - g.position) < snapThreshold) {
                 snapDx = g.position - edge;
                 snappedX = true;
                 break;
@@ -338,7 +514,7 @@ export default function Canvas() {
           if (g.orientation === 'h' && !snappedY) {
             const yEdges = [tTop, tBottom, tCenterY];
             for (const edge of yEdges) {
-              if (Math.abs(edge - g.position) < SNAP_THRESHOLD) {
+              if (Math.abs(edge - g.position) < snapThreshold) {
                 snapDy = g.position - edge;
                 snappedY = true;
                 break;
@@ -375,10 +551,45 @@ export default function Canvas() {
     ]);
   }, []);
 
+  // Associative dimensions and connectors follow their referenced shapes
+  // during the gesture, not only after mouse-up.
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const updateLinked = (opt: { target?: fabric.FabricObject }) => {
+      const target = opt.target;
+      if (!target) return;
+      target.setCoords();
+      const changedId = target instanceof fabric.Group || target instanceof fabric.ActiveSelection
+        ? undefined
+        : ensureObjectId(target);
+      updateLinkedSemanticObjects(canvas, getDimensionLabel, changedId);
+    };
+    return disposeAll([
+      canvas.on('object:moving', updateLinked),
+      canvas.on('object:scaling', updateLinked),
+      canvas.on('object:rotating', updateLinked),
+    ]);
+  }, [getDimensionLabel]);
+
   // Drawing logic
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
+
+    const constrainPoint = (
+      tool: ToolType,
+      start: { x: number; y: number },
+      resolved: { point: { x: number; y: number }; anchor: SemanticAnchor },
+      event: MouseEvent,
+    ) => {
+      const ortho = useEditorStore.getState().orthoMode || event.shiftKey;
+      if (!ortho || !ORTHO_TOOLS.includes(tool)) return resolved;
+      const constrained = applyOrtho(start.x, start.y, resolved.point.x, resolved.point.y);
+      if (constrained.x === resolved.point.x && constrained.y === resolved.point.y) return resolved;
+      osnapMarker.current = null;
+      return { point: constrained, anchor: { x: constrained.x, y: constrained.y } };
+    };
 
     const handleMouseDown = (opt: fabric.TPointerEventInfo) => {
       // CAD pan: Space+left click or middle mouse button
@@ -390,94 +601,76 @@ export default function Canvas() {
         return;
       }
 
-      // Pencil uses Fabric's built-in free-drawing; nothing to do on mouse down
       if (activeTool === 'select' || activeTool === 'pencil') return;
       const rawPointer = canvas.getScenePoint(opt.e);
-      const pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
+      const resolved = resolveDrawingPoint(canvas, rawPointer);
+      const pointer = resolved.point;
 
-      // Measure tool: start drawing a temporary rectangle
       if (activeTool === 'measure') {
-        isDrawing.current = true;
-        drawStart.current = { x: pointer.x, y: pointer.y };
-        canvas.selection = false;
+        startMeasuring(pointer);
         return;
       }
 
-      // Stretch tool: start drawing crossing window
       if (activeTool === 'stretch') {
-        isDrawing.current = true;
-        drawStart.current = { x: pointer.x, y: pointer.y };
-        canvas.selection = false;
+        startStretching(pointer);
         return;
       }
 
-      // LaTeX tool: click to open dialog
       if (activeTool === 'latex') {
+        startLatexPlacement(pointer);
         setLatexPlacement({ x: pointer.x, y: pointer.y });
         return;
       }
 
-      // Column tool: click to place
       if (activeTool === 'column') {
+        const editorStyle = loadCurrentEditorStyle('shape');
         const sz = gridSize > 0 ? gridSize : 20;
         const id = generateObjectId('column');
         const col = new fabric.Rect({
-          left: snap(rawPointer.x) - sz / 2,
-          top: snap(rawPointer.y) - sz / 2,
+          left: pointer.x - sz / 2,
+          top: pointer.y - sz / 2,
           width: sz,
           height: sz,
           fill: '#333333',
           stroke: '#111111',
           strokeWidth: 1,
         });
-        applyDefaults(col, id);
+        applyEditorStyle(col, editorStyle);
+        applyDefaults(col, id, TOOL_DEFINITIONS.column.objectKind);
         canvas.add(col);
         finishDrawing(col);
         return;
       }
 
-      // Polygon/Polyline tool: accumulate points
       if (activeTool === 'polygon' || activeTool === 'polyline') {
-        polygonPoints.current.push({ x: pointer.x, y: pointer.y });
-        if (polygonPoints.current.length > 1) {
-          const pts = polygonPoints.current;
-          const line = new fabric.Line(
-            [pts[pts.length - 2].x, pts[pts.length - 2].y, pts[pts.length - 1].x, pts[pts.length - 1].y],
-            { stroke: '#999', strokeWidth: 1, selectable: false, evented: false },
-          );
-          canvas.add(line);
-          polygonLines.current.push(line);
-          canvas.requestRenderAll();
-        }
+        startPolyline(activeTool, pointer, resolved.anchor);
         return;
       }
 
-      // Text tool: place text on click
       if (activeTool === 'text') {
+        const editorStyle = loadCurrentEditorStyle('text');
         const id = generateObjectId('text');
         const textbox = new fabric.Textbox(t('defaultText'), {
           left: pointer.x,
           top: pointer.y,
           width: 200,
-          fontSize: 24,
-          fontFamily: 'sans-serif',
-          fill: '#333333',
+          fontSize: editorStyle.fontSize,
+          fontFamily: editorStyle.fontFamily,
+          fontWeight: editorStyle.fontWeight,
+          fontStyle: editorStyle.fontStyle as '' | 'normal' | 'italic' | 'oblique',
+          fill: editorStyle.fill,
           editable: true,
         });
-        applyDefaults(textbox, id);
+        applyDefaults(textbox, id, TOOL_DEFINITIONS.text.objectKind);
         canvas.add(textbox);
         finishDrawing(textbox);
         return;
       }
 
-      // Standard shape drawing
-      isDrawing.current = true;
-      drawStart.current = { x: pointer.x, y: pointer.y };
-      canvas.selection = false;
+      startDragging(activeTool, pointer, resolved.anchor);
     };
 
     const handleMouseMove = (opt: fabric.TPointerEventInfo) => {
-      // CAD panning
       if (isPanning.current) {
         const vpt = canvas.viewportTransform;
         if (vpt) {
@@ -485,210 +678,172 @@ export default function Canvas() {
           vpt[5] += (opt.e as MouseEvent).clientY - lastPanPoint.current.y;
           lastPanPoint.current = { x: (opt.e as MouseEvent).clientX, y: (opt.e as MouseEvent).clientY };
           canvas.setViewportTransform(vpt);
+          notifyViewportChange();
         }
         return;
       }
 
-      // Track live cursor position for the status bar (all tools).
-      // Only push to the store when the rounded position changes, to avoid
-      // re-rendering the status bar on every sub-pixel mouse move.
       const cursorPoint = canvas.getScenePoint(opt.e);
-      const rx = Math.round(cursorPoint.x);
-      const ry = Math.round(cursorPoint.y);
-      if (!lastCursor.current || lastCursor.current.x !== rx || lastCursor.current.y !== ry) {
-        lastCursor.current = { x: rx, y: ry };
-        useEditorStore.getState().setCursorPos({ x: cursorPoint.x, y: cursorPoint.y });
-      }
+      scheduleCursorPosition(cursorPoint);
 
-      if (!isDrawing.current || activeTool === 'select') return;
-      const rawPointer = canvas.getScenePoint(opt.e);
-      let pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
-
-      // Ortho / angle constraint for linear tools (toggle or hold Shift)
-      const orthoMove = useEditorStore.getState().orthoMode || (opt.e as MouseEvent).shiftKey;
-      if (orthoMove && ORTHO_TOOLS.includes(activeTool)) {
-        const c = applyOrtho(drawStart.current.x, drawStart.current.y, pointer.x, pointer.y);
-        pointer = { x: c.x, y: c.y };
-      }
-
-      // Measure tool preview
-      if (activeTool === 'measure') {
-        if (measureShape.current) {
-          canvas.remove(measureShape.current);
+      const session = sessionRef.current;
+      if (session.kind === 'idle') {
+        if (activeTool !== 'select' && activeTool !== 'pencil') {
+          resolveDrawingPoint(canvas, cursorPoint);
+          canvas.requestRenderAll();
+        } else {
+          osnapMarker.current = null;
         }
-        const left = Math.min(drawStart.current.x, pointer.x);
-        const top = Math.min(drawStart.current.y, pointer.y);
-        const w = Math.abs(pointer.x - drawStart.current.x);
-        const h = Math.abs(pointer.y - drawStart.current.y);
-        const rect = new fabric.Rect({
-          left, top, width: w, height: h,
-          fill: 'rgba(66,133,244,0.15)',
-          stroke: '#4285f4',
+        return;
+      }
+      if (session.kind === 'placingLatex') {
+        osnapMarker.current = null;
+        return;
+      }
+      let resolved = resolveDrawingPoint(canvas, cursorPoint);
+
+      if (session.kind === 'polyline') {
+        const preview = new fabric.Polyline([...session.points, resolved.point], {
+          fill: '',
+          stroke: '#1F4E79',
+          strokeWidth: 2,
+          strokeDashArray: [5, 4],
+          selectable: false,
+          evented: false,
+          objectCaching: false,
+        });
+        setPreview(preview);
+        return;
+      }
+
+      if (session.kind === 'measuring' || session.kind === 'stretching') {
+        const left = Math.min(session.start.x, resolved.point.x);
+        const top = Math.min(session.start.y, resolved.point.y);
+        const width = Math.abs(resolved.point.x - session.start.x);
+        const height = Math.abs(resolved.point.y - session.start.y);
+        setPreview(new fabric.Rect({
+          left,
+          top,
+          width,
+          height,
+          fill: session.kind === 'measuring'
+            ? 'rgba(66,133,244,0.15)'
+            : 'rgba(255,152,0,0.15)',
+          stroke: session.kind === 'measuring' ? '#4285f4' : '#ff9800',
           strokeWidth: 1,
           strokeDashArray: [4, 4],
           selectable: false,
           evented: false,
-        });
-        canvas.add(rect);
-        measureShape.current = rect;
-        canvas.requestRenderAll();
+          objectCaching: false,
+        }));
         return;
       }
 
-      // Stretch tool preview
-      if (activeTool === 'stretch') {
-        if (stretchPreview.current) {
-          canvas.remove(stretchPreview.current);
-        }
-        const left = Math.min(drawStart.current.x, pointer.x);
-        const top = Math.min(drawStart.current.y, pointer.y);
-        const w = Math.abs(pointer.x - drawStart.current.x);
-        const h = Math.abs(pointer.y - drawStart.current.y);
-        const rect = new fabric.Rect({
-          left, top, width: w, height: h,
-          fill: 'rgba(255,152,0,0.15)',
-          stroke: '#ff9800',
-          strokeWidth: 1,
-          strokeDashArray: [4, 4],
-          selectable: false,
-          evented: false,
-        });
-        canvas.add(rect);
-        stretchPreview.current = rect;
-        canvas.requestRenderAll();
-        return;
-      }
-
-      // Remove previous preview
-      if (currentShape.current) {
-        canvas.remove(currentShape.current);
-      }
-
-      const shape = createDraggedShape(
-        activeTool,
-        drawStart.current.x,
-        drawStart.current.y,
-        pointer.x,
-        pointer.y,
+      resolved = constrainPoint(session.tool, session.start, resolved, opt.e as MouseEvent);
+      const preview = createDraggedShape(
+        session.tool,
+        session.start.x,
+        session.start.y,
+        resolved.point.x,
+        resolved.point.y,
+        {
+          start: session.startAnchor,
+          end: resolved.anchor,
+          connectorRoute: (opt.e as MouseEvent).altKey ? 'elbow' : 'straight',
+        },
       );
-
-      if (shape) {
-        shape.selectable = false;
-        shape.evented = false;
-        canvas.add(shape);
-        currentShape.current = shape;
-        canvas.requestRenderAll();
+      if (preview) {
+        preview.set({ selectable: false, evented: false, objectCaching: false });
       }
+      setPreview(preview);
     };
 
     const handleMouseUp = (opt: fabric.TPointerEventInfo) => {
-      // CAD pan end
       if (isPanning.current) {
         isPanning.current = false;
         const tool = useEditorStore.getState().activeTool;
         canvas.defaultCursor = spacePressed.current ? 'grab' : (tool === 'select' ? 'default' : 'crosshair');
+        notifyViewportChange();
         return;
       }
 
-      if (!isDrawing.current || activeTool === 'select') return;
-      isDrawing.current = false;
-      const rawPointer = canvas.getScenePoint(opt.e);
-      let pointer = { x: snap(rawPointer.x), y: snap(rawPointer.y) };
+      const session = sessionRef.current;
+      if (session.kind === 'idle' || session.kind === 'polyline' || session.kind === 'placingLatex') return;
+      let resolved = resolveDrawingPoint(canvas, canvas.getScenePoint(opt.e));
 
-      // Ortho / angle constraint for linear tools (toggle or hold Shift)
-      const orthoUp = useEditorStore.getState().orthoMode || (opt.e as MouseEvent).shiftKey;
-      if (orthoUp && ORTHO_TOOLS.includes(activeTool)) {
-        const c = applyOrtho(drawStart.current.x, drawStart.current.y, pointer.x, pointer.y);
-        pointer = { x: c.x, y: c.y };
-      }
-
-      // Stretch tool: save box and show dialog
-      if (activeTool === 'stretch') {
-        if (stretchPreview.current) {
-          canvas.remove(stretchPreview.current);
-          stretchPreview.current = null;
+      if (session.kind === 'stretching') {
+        finishSession();
+        const left = Math.min(session.start.x, resolved.point.x);
+        const top = Math.min(session.start.y, resolved.point.y);
+        const width = Math.abs(resolved.point.x - session.start.x);
+        const height = Math.abs(resolved.point.y - session.start.y);
+        if (width >= 2 || height >= 2) {
+          setStretchBox({ left, top, width, height });
         }
-        const left = Math.min(drawStart.current.x, pointer.x);
-        const top = Math.min(drawStart.current.y, pointer.y);
-        const w = Math.abs(pointer.x - drawStart.current.x);
-        const h = Math.abs(pointer.y - drawStart.current.y);
-        if (w >= 2 || h >= 2) {
-          setStretchBox({ left, top, width: w, height: h });
-          setStretchDx(0);
-          setStretchDy(0);
-        }
-        canvas.selection = true;
-        canvas.requestRenderAll();
         return;
       }
 
-      // Measure tool: calculate LaTeX coordinates and show popup
-      if (activeTool === 'measure') {
-        if (measureShape.current) {
-          canvas.remove(measureShape.current);
-          measureShape.current = null;
-        }
-        const left = Math.min(drawStart.current.x, pointer.x);
-        const top = Math.min(drawStart.current.y, pointer.y);
-        const w = Math.abs(pointer.x - drawStart.current.x);
-        const h = Math.abs(pointer.y - drawStart.current.y);
-        if (w >= 2 || h >= 2) {
+      if (session.kind === 'measuring') {
+        finishSession();
+        const left = Math.min(session.start.x, resolved.point.x);
+        const top = Math.min(session.start.y, resolved.point.y);
+        const width = Math.abs(resolved.point.x - session.start.x);
+        const height = Math.abs(resolved.point.y - session.start.y);
+        if (width >= 2 || height >= 2) {
           const {
             drawingMode: mode,
             canvasHeight: currentCanvasHeight,
             cadHeight: currentCadHeight,
           } = useEditorStore.getState();
           const docHeight = mode === 'cad' ? currentCadHeight : currentCanvasHeight;
-          // LaTeX: origin bottom-left, y upward
           const latexX = Math.round(left);
-          const latexY = Math.round(docHeight - (top + h));
-          setMeasureResult({ x: latexX, y: latexY, width: Math.round(w), height: Math.round(h) });
+          const latexY = Math.round(docHeight - (top + height));
+          setMeasureResult({
+            x: latexX,
+            y: latexY,
+            width: Math.round(width),
+            height: Math.round(height),
+          });
         }
-        canvas.selection = true;
-        canvas.requestRenderAll();
         setActiveTool('select');
         return;
       }
 
-      // Remove preview
-      if (currentShape.current) {
-        canvas.remove(currentShape.current);
-        currentShape.current = null;
-      }
-
+      resolved = constrainPoint(session.tool, session.start, resolved, opt.e as MouseEvent);
+      finishSession();
       const shape = createDraggedShape(
-        activeTool,
-        drawStart.current.x,
-        drawStart.current.y,
-        pointer.x,
-        pointer.y,
+        session.tool,
+        session.start.x,
+        session.start.y,
+        resolved.point.x,
+        resolved.point.y,
+        {
+          start: session.startAnchor,
+          end: resolved.anchor,
+          connectorRoute: (opt.e as MouseEvent).altKey ? 'elbow' : 'straight',
+        },
       );
 
       if (shape) {
         canvas.add(shape);
         finishDrawing(shape);
       }
-
-      canvas.selection = true;
     };
 
     const handleDblClick = () => {
-      // Finish polygon/polyline on double-click
-      if (
-        (activeTool === 'polygon' || activeTool === 'polyline') &&
-        polygonPoints.current.length >= 2
-      ) {
-        // Remove preview lines
-        polygonLines.current.forEach((l) => canvas.remove(l));
-        polygonLines.current = [];
-
-        const points = [...polygonPoints.current];
-        polygonPoints.current = [];
-
-        const id = generateObjectId(activeTool);
+      const session = sessionRef.current;
+      if (session.kind !== 'polyline') return;
+      const epsilon = 1 / Math.max(canvas.getZoom(), 0.001);
+      const points = session.points.filter((point, index, values) => {
+        if (index === 0) return true;
+        const previous = values[index - 1];
+        return Math.hypot(point.x - previous.x, point.y - previous.y) > epsilon;
+      });
+      const minimumPoints = session.tool === 'polygon' ? 3 : 2;
+      if (points.length >= minimumPoints) {
+        const id = generateObjectId(session.tool);
         let obj: fabric.FabricObject;
-
-        if (activeTool === 'polygon') {
+        if (session.tool === 'polygon') {
           obj = new fabric.Polygon(points, {
             fill: '#D9EAF7',
             stroke: '#1F4E79',
@@ -701,16 +856,18 @@ export default function Canvas() {
             strokeWidth: 2,
           });
         }
-
-        applyDefaults(obj, id);
+        applyEditorStyle(obj, loadCurrentEditorStyle(session.tool === 'polyline' ? 'line' : 'shape'));
+        applyDefaults(obj, id, TOOL_DEFINITIONS[session.tool].objectKind);
+        finishSession();
         canvas.add(obj);
         finishDrawing(obj);
       }
     };
 
     const handleMouseOut = () => {
-      lastCursor.current = null;
-      useEditorStore.getState().setCursorPos(null);
+      osnapMarker.current = null;
+      clearCursorPosition();
+      canvas.requestRenderAll();
     };
 
     return disposeAll([
@@ -720,7 +877,29 @@ export default function Canvas() {
       canvas.on('mouse:dblclick', handleDblClick),
       canvas.on('mouse:out', handleMouseOut),
     ]);
-  }, [activeTool, createDraggedShape, finishDrawing, setActiveTool, t, snap, gridSize, isPanning, lastPanPoint, spacePressed]);
+  }, [
+    activeTool,
+    createDraggedShape,
+    finishDrawing,
+    setActiveTool,
+    t,
+    gridSize,
+    isPanning,
+    lastPanPoint,
+    spacePressed,
+    notifyViewportChange,
+    resolveDrawingPoint,
+    sessionRef,
+    startDragging,
+    startPolyline,
+    startMeasuring,
+    startStretching,
+    startLatexPlacement,
+    setPreview,
+    finishSession,
+    scheduleCursorPosition,
+    clearCursorPosition,
+  ]);
 
   // Render smart guide lines and stored guide lines via after:render
   useEffect(() => {
@@ -730,10 +909,9 @@ export default function Canvas() {
     const handler = () => {
       const ctx = canvas.getContext();
       const vpt = canvas.viewportTransform;
-      const isCad = useEditorStore.getState().drawingMode === 'cad';
-      const z = isCad ? canvas.getZoom() : 1;
-      const panX = isCad && vpt ? vpt[4] : 0;
-      const panY = isCad && vpt ? vpt[5] : 0;
+      const z = canvas.getZoom();
+      const panX = vpt?.[4] ?? 0;
+      const panY = vpt?.[5] ?? 0;
       const w = canvas.width || 0;
       const h = canvas.height || 0;
 
@@ -784,47 +962,104 @@ export default function Canvas() {
         ctx.setLineDash([]);
         ctx.restore();
       }
+
+      renderPreview(ctx);
+
+      const marker = osnapMarker.current;
+      if (marker && useEditorStore.getState().drawingMode === 'cad') {
+        const x = marker.point.x * z + panX;
+        const y = marker.point.y * z + panY;
+        const radius = 5;
+        ctx.save();
+        ctx.strokeStyle = '#e91e63';
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        if (marker.kind === 'endpoint') {
+          ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
+        } else if (marker.kind === 'midpoint') {
+          ctx.moveTo(x, y - radius);
+          ctx.lineTo(x + radius, y + radius);
+          ctx.lineTo(x - radius, y + radius);
+          ctx.closePath();
+        } else if (marker.kind === 'center') {
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.moveTo(x - radius - 2, y);
+          ctx.lineTo(x + radius + 2, y);
+          ctx.moveTo(x, y - radius - 2);
+          ctx.lineTo(x, y + radius + 2);
+        } else {
+          ctx.moveTo(x - radius, y - radius);
+          ctx.lineTo(x + radius, y + radius);
+          ctx.moveTo(x + radius, y - radius);
+          ctx.lineTo(x - radius, y + radius);
+        }
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
     };
 
     return canvas.on('after:render', handler);
-  }, []);
+  }, [renderPreview]);
 
   const handleLatexPlace = useCallback(
-    (dataUrl: string) => {
+    (dataUrl: string, latexSource: string, latexFontSize: number) => {
       const canvas = fabricRef.current;
       if (!canvas || !latexPlacement) return;
+      const placement = { ...latexPlacement };
+      const operationToken = ++latexOperationToken.current;
+      const canCommit = createAsyncCanvasMutationGuard(canvas);
 
       fabric.Image.fromURL(dataUrl).then((img) => {
+        if (
+          operationToken !== latexOperationToken.current
+          || !fabricRef.current
+          || !canCommit()
+        ) {
+          img.dispose();
+          return;
+        }
         img.set({
-          left: latexPlacement.x,
-          top: latexPlacement.y,
+          left: placement.x,
+          top: placement.y,
           scaleX: 1 / 3,
           scaleY: 1 / 3,
         });
         const id = generateObjectId('latex');
-        applyDefaults(img, id);
+        applyDefaults(img, id, TOOL_DEFINITIONS.latex.objectKind);
+        setFabricMetadataValues(img, { latexSource, latexFontSize });
+        finishSession();
         canvas.add(img);
         finishDrawing(img);
         setLatexPlacement(null);
+      }).catch(() => {
+        if (operationToken === latexOperationToken.current && canCommit()) {
+          cancelSession();
+          setLatexPlacement(null);
+          setActiveTool('select');
+        }
       });
     },
-    [latexPlacement, finishDrawing],
+    [latexPlacement, finishDrawing, finishSession, cancelSession, setActiveTool],
   );
 
   const handleLatexCancel = useCallback(() => {
+    latexOperationToken.current += 1;
+    cancelSession();
     setLatexPlacement(null);
     setActiveTool('select');
-  }, [setActiveTool]);
+  }, [cancelSession, setActiveTool]);
 
-  const handleStretchApply = () => {
+  const handleStretchApply = (inputDx: number, inputDy: number) => {
     const canvas = fabricRef.current;
     if (!canvas || !stretchBox) return;
 
     const { drawingMode: dm, cadUnit: cu } = useEditorStore.getState();
     const isCad = dm === 'cad';
 
-    const dx = isCad ? unitToMm(stretchDx, cu) : stretchDx;
-    const dy = isCad ? unitToMm(stretchDy, cu) : stretchDy;
+    const dx = isCad ? unitToMm(inputDx, cu) : inputDx;
+    const dy = isCad ? unitToMm(inputDy, cu) : inputDy;
 
     if (dx === 0 && dy === 0) {
       setStretchBox(null);
@@ -912,6 +1147,7 @@ export default function Canvas() {
       }
     });
 
+    updateLinkedSemanticObjects(canvas, getDimensionLabel);
     canvas.requestRenderAll();
     pushHistory();
     setStretchBox(null);
@@ -930,8 +1166,18 @@ export default function Canvas() {
       {showRulers && (
         <>
           <RulerCorner />
-          <Ruler orientation="h" canvasEl={wrapperEl} />
-          <Ruler orientation="v" canvasEl={wrapperEl} />
+          <Ruler
+            orientation="h"
+            canvasEl={wrapperEl}
+            fabricCanvas={storeCanvas}
+            viewport={viewport}
+          />
+          <Ruler
+            orientation="v"
+            canvasEl={wrapperEl}
+            fabricCanvas={storeCanvas}
+            viewport={viewport}
+          />
         </>
       )}
       <div
@@ -956,7 +1202,9 @@ export default function Canvas() {
         />
       </div>
 
-      {latexPlacement && (
+      {latexPlacement
+        && activeTool === 'latex'
+        && (
         <LatexDialog
           onPlace={handleLatexPlace}
           onCancel={handleLatexCancel}
@@ -965,10 +1213,6 @@ export default function Canvas() {
 
       {stretchBox && (
         <StretchDialog
-          stretchDx={stretchDx}
-          stretchDy={stretchDy}
-          setStretchDx={setStretchDx}
-          setStretchDy={setStretchDy}
           onApply={handleStretchApply}
           onCancel={handleStretchCancel}
         />

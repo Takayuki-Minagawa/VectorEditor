@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import { formatReal, mmToUnit } from '../types';
+import Dialog from './Dialog';
 
 export interface MeasureResult {
   x: number;
@@ -42,18 +43,19 @@ export default function MeasurePopup({ result, onClose }: MeasurePopupProps) {
   const [copiedResultKey, setCopiedResultKey] = useState<string | null>(null);
   const measureCopied = copiedResultKey === resultKey;
 
-  const handleCopyMeasure = () => {
+  const handleCopyMeasure = async () => {
     const text = `x=${result.x}, y=${result.y}, width=${result.width}, height=${result.height}`;
-    navigator.clipboard.writeText(text).then(() => {
+    try {
+      await navigator.clipboard.writeText(text);
       setCopiedResultKey(resultKey);
       setTimeout(() => setCopiedResultKey(null), 1500);
-    });
+    } catch {
+      useEditorStore.getState().showToast(t('clipboardError'), 'error');
+    }
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="measure-popup" onClick={(e) => e.stopPropagation()}>
-        <div className="measure-popup-title">{t('measureResult')}</div>
+    <Dialog title={t('measureResult')} onClose={onClose} closeLabel={t('measureClose')} className="measure-popup">
         <MeasureBody result={result} />
         <div className="measure-popup-actions">
           <button className="toolbar-btn" onClick={handleCopyMeasure}>
@@ -63,7 +65,6 @@ export default function MeasurePopup({ result, onClose }: MeasurePopupProps) {
             {t('measureClose')}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
