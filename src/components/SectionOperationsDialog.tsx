@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
@@ -22,6 +23,7 @@ import {
 import type { SectionProfileData } from '../domain/section';
 import Dialog from './Dialog';
 import { NumberField } from './PropertyField';
+import StandardSectionGenerator from './StandardSectionGenerator';
 
 interface SectionOperationsDialogProps {
   onClose: () => void;
@@ -85,6 +87,11 @@ export default function SectionOperationsDialog({ onClose }: SectionOperationsDi
   const [keepSources, setKeepSources] = useState(false);
   const [toleranceMm, setToleranceMm] = useState(DEFAULT_SECTION_TOLERANCE_MM);
   const [radiusMm, setRadiusMm] = useState(5);
+  const [activeTab, setActiveTab] = useState<'standard' | 'edit'>(
+    () => canvas?.getActiveObject() ? 'edit' : 'standard',
+  );
+  const standardTabRef = useRef<HTMLButtonElement>(null);
+  const editTabRef = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectionRevision, setSelectionRevision] = useState(0);
   const [cornerSelection, setCornerSelection] = useState<{
@@ -160,7 +167,12 @@ export default function SectionOperationsDialog({ onClose }: SectionOperationsDi
     previewError: string | null;
   } => {
     void selectionRevision;
-    if (!canvas || drawingMode !== 'cad' || selectedCornerReferences.length === 0) {
+    if (
+      activeTab !== 'edit'
+      || !canvas
+      || drawingMode !== 'cad'
+      || selectedCornerReferences.length === 0
+    ) {
       return { profile: null, maximumRadiusMm: null, previewError: null };
     }
     try {
@@ -194,7 +206,7 @@ export default function SectionOperationsDialog({ onClose }: SectionOperationsDi
         previewError: caught instanceof Error ? caught.message : null,
       };
     }
-  }, [canvas, drawingMode, radiusMm, selectedCornerReferences, selectionRevision, toleranceMm]);
+  }, [activeTab, canvas, drawingMode, radiusMm, selectedCornerReferences, selectionRevision, toleranceMm]);
 
   useEffect(() => {
     if (!canvas || !previewState.profile) {
@@ -228,60 +240,129 @@ export default function SectionOperationsDialog({ onClose }: SectionOperationsDi
   };
 
   const options = { keepSources, toleranceMm };
+  const activateTab = (tab: 'standard' | 'edit', focus = false) => {
+    setActiveTab(tab);
+    if (focus) (tab === 'standard' ? standardTabRef : editTabRef).current?.focus();
+  };
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    let next: 'standard' | 'edit' | null = null;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      next = activeTab === 'standard' ? 'edit' : 'standard';
+    } else if (event.key === 'Home') {
+      next = 'standard';
+    } else if (event.key === 'End') {
+      next = 'edit';
+    }
+    if (!next) return;
+    event.preventDefault();
+    activateTab(next, true);
+  };
 
   return (
-    <Dialog title={t('sectionDialogTitle')} onClose={onClose} maxWidth={560}>
+    <Dialog title={t('sectionDialogTitle')} onClose={onClose} maxWidth={600}>
       <div className="section-dialog-body">
-        <p className="section-dialog-help">{t('sectionSelectionRequired')}</p>
-        <div className="section-operation-grid">
+        <div className="section-dialog-tabs" role="tablist" aria-label={t('sectionDialogTitle')}>
           <button
-            className="toolbar-btn"
-            onClick={() => run(() => { createSectionFromSelection(canvas!, pushHistory, options); })}
+            ref={standardTabRef}
+            type="button"
+            role="tab"
+            id="section-tab-standard"
+            aria-controls="section-panel-standard"
+            aria-selected={activeTab === 'standard'}
+            tabIndex={activeTab === 'standard' ? 0 : -1}
+            data-autofocus={activeTab === 'standard' ? '' : undefined}
+            className={activeTab === 'standard' ? 'active' : ''}
+            onClick={() => activateTab('standard')}
+            onKeyDown={handleTabKeyDown}
           >
-            {t('sectionCreate')}
+            {t('standardSectionTab')}
           </button>
           <button
-            className="toolbar-btn"
-            onClick={() => run(() => { unionSelectionAsSection(canvas!, pushHistory, options); })}
+            ref={editTabRef}
+            type="button"
+            role="tab"
+            id="section-tab-edit"
+            aria-controls="section-panel-edit"
+            aria-selected={activeTab === 'edit'}
+            tabIndex={activeTab === 'edit' ? 0 : -1}
+            data-autofocus={activeTab === 'edit' ? '' : undefined}
+            className={activeTab === 'edit' ? 'active' : ''}
+            onClick={() => activateTab('edit')}
+            onKeyDown={handleTabKeyDown}
           >
-            {t('sectionUnion')}
-          </button>
-          <button
-            className="toolbar-btn"
-            onClick={() => run(() => { subtractSelectionFromSection(canvas!, pushHistory, options); })}
-          >
-            {t('sectionSubtract')}
-          </button>
-          <button
-            className="toolbar-btn"
-            disabled={selectedCornerReferences.length === 0}
-            onClick={() => run(() => {
-              filletSelectedSection(canvas!, pushHistory, radiusMm, {
-                ...options,
-                filletCorners: selectedCornerReferences,
-              });
-            })}
-          >
-            {t('sectionFillet')}
+            {t('sectionEditTab')}
           </button>
         </div>
 
-        <NumberField
-          label={t('sectionTolerance')}
-          value={toleranceMm}
-          onChange={setToleranceMm}
-          min={0.000001}
-          max={10}
-          step={0.001}
-        />
-        <NumberField
-          label={t('sectionRadius')}
-          value={radiusMm}
-          onChange={setRadiusMm}
-          min={0.000001}
-          step={1}
-        />
-        <section className="section-corner-picker" aria-labelledby="section-corner-picker-title">
+        <div
+          id="section-panel-standard"
+          className="section-tab-panel"
+          role="tabpanel"
+          aria-labelledby="section-tab-standard"
+          hidden={activeTab !== 'standard'}
+        >
+          <StandardSectionGenerator
+            toleranceMm={toleranceMm}
+            setToleranceMm={setToleranceMm}
+          />
+        </div>
+        <div
+          id="section-panel-edit"
+          className="section-tab-panel"
+          role="tabpanel"
+          aria-labelledby="section-tab-edit"
+          hidden={activeTab !== 'edit'}
+        >
+            <p className="section-dialog-help">{t('sectionSelectionRequired')}</p>
+            <div className="section-operation-grid">
+              <button
+                className="toolbar-btn"
+                onClick={() => run(() => { createSectionFromSelection(canvas!, pushHistory, options); })}
+              >
+                {t('sectionCreate')}
+              </button>
+              <button
+                className="toolbar-btn"
+                onClick={() => run(() => { unionSelectionAsSection(canvas!, pushHistory, options); })}
+              >
+                {t('sectionUnion')}
+              </button>
+              <button
+                className="toolbar-btn"
+                onClick={() => run(() => { subtractSelectionFromSection(canvas!, pushHistory, options); })}
+              >
+                {t('sectionSubtract')}
+              </button>
+              <button
+                className="toolbar-btn"
+                disabled={selectedCornerReferences.length === 0}
+                onClick={() => run(() => {
+                  filletSelectedSection(canvas!, pushHistory, radiusMm, {
+                    ...options,
+                    filletCorners: selectedCornerReferences,
+                  });
+                })}
+              >
+                {t('sectionFillet')}
+              </button>
+            </div>
+
+            <NumberField
+              label={t('sectionTolerance')}
+              value={toleranceMm}
+              onChange={setToleranceMm}
+              min={0.000001}
+              max={10}
+              step={0.001}
+            />
+            <NumberField
+              label={t('sectionRadius')}
+              value={radiusMm}
+              onChange={setRadiusMm}
+              min={0.000001}
+              step={1}
+            />
+            <section className="section-corner-picker" aria-labelledby="section-corner-picker-title">
           <div className="section-corner-picker-header">
             <strong id="section-corner-picker-title">
               {t('sectionFilletCorners')} ({selectedCorners.length}/{cornerState.corners.length})
@@ -348,16 +429,17 @@ export default function SectionOperationsDialog({ onClose }: SectionOperationsDi
           {previewState.previewError && selectedCornerReferences.length > 0 && (
             <p className="section-warning">{previewState.previewError}</p>
           )}
-        </section>
-        <label className="section-checkbox-row">
-          <input
-            type="checkbox"
-            checked={keepSources}
-            onChange={(event) => setKeepSources(event.target.checked)}
-          />
-          <span>{t('sectionKeepSources')}</span>
-        </label>
-        {error && <p className="section-error" role="alert">{error}</p>}
+            </section>
+            <label className="section-checkbox-row">
+              <input
+                type="checkbox"
+                checked={keepSources}
+                onChange={(event) => setKeepSources(event.target.checked)}
+              />
+              <span>{t('sectionKeepSources')}</span>
+            </label>
+            {error && <p className="section-error" role="alert">{error}</p>}
+        </div>
       </div>
     </Dialog>
   );

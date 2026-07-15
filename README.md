@@ -46,6 +46,7 @@ Vector Illustration Editor v1.1.0 is a browser-based editor for diagrams, illust
 In CAD mode, supported closed shapes can be converted into a section profile at `1 unit = 1 mm`.
 
 - Inputs: rectangles, rounded rectangles, circles, ellipses, closed polygons, supported groups, and existing section profiles
+- Basic templates: enter nominal dimensions for rectangular/circular hollow sections, H sections, channels, and lipped channels, then place the generated profile at the visible canvas centre
 - Operations: create a section, union overlapping material, subtract holes/notches, and apply a numeric radius to selected convex line-line corners
 - Results: area, centroid, `Ix`, `Iy`, `Ixy`, principal moments/axis, centroid-to-extreme-fibre distances, and side-specific elastic section moduli
 - Display: switch between mm- and cm-based result units; show centroid, centroidal axes, principal axis, and extreme-fibre bounds as non-persistent overlays
@@ -183,6 +184,7 @@ src/
     useUiStore.ts          Collapsible-panel and palette state
   utils/
     sectionGeometry.ts     Fabric-to-section conversion and curve tessellation
+    sectionProfileTemplates.ts  Dimension-driven basic steel section profiles
     sectionBoolean.ts      Material union and cut-out operations
     sectionProperties.ts   Area, centroid, inertia, axes, distances, and moduli
     documentSerializer.ts  Schema v2 validation, migration, restore
@@ -198,6 +200,7 @@ e2e/                       Playwright scenarios
 ### Unreleased
 
 - Added CAD section profiles with material union, cut-outs, convex-corner fillets, and geometric section-property results
+- Added dimension-driven templates for rectangular/circular hollow, H, channel, and lipped-channel steel sections
 - Added robust ring/topology validation, large-coordinate numerical stabilization, principal-axis calculation, and large-profile Worker analysis
 - Preserved section profiles through history, JSON/auto-save/projects/symbols/cloning and SVG/PNG/PDF/DXF export
 

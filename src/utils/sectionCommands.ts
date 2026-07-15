@@ -1,6 +1,6 @@
 import * as fabric from 'fabric';
 import type { SectionProfileData } from '../domain/section';
-import { captureEditorStyle } from './stylePresets';
+import { captureEditorStyle, loadCurrentEditorStyle } from './stylePresets';
 import { executeCanvasTransaction, type PushHistory } from './canvasCommands';
 import { differenceSectionProfiles, unionSectionProfiles } from './sectionBoolean';
 import {
@@ -17,11 +17,20 @@ import {
 import { createSectionPath, type SectionProfilePath } from './sectionShapeFactory';
 import { assignNewObjectId } from './objectIds';
 import { getFabricMetadata } from './fabricObjectMetadata';
+import {
+  createStandardSectionProfile,
+  type StandardSectionSpec,
+} from './sectionProfileTemplates';
 
 export interface SectionOperationOptions {
   toleranceMm?: number;
   keepSources?: boolean;
   filletCorners?: readonly SectionCornerReference[];
+}
+
+export interface CreateStandardSectionOptions {
+  toleranceMm?: number;
+  name?: string;
 }
 
 export class SectionCommandError extends Error {
@@ -86,6 +95,42 @@ function commitSectionReplacement(
 
 function tolerance(options: SectionOperationOptions): number {
   return options.toleranceMm ?? DEFAULT_SECTION_TOLERANCE_MM;
+}
+
+/** Creates one dimension-driven section profile at the centre of the visible canvas. */
+export function createStandardSectionOnCanvas(
+  canvas: fabric.Canvas,
+  pushHistory: PushHistory,
+  spec: StandardSectionSpec,
+  options: CreateStandardSectionOptions = {},
+): SectionProfilePath {
+  const profile = createStandardSectionProfile(
+    spec,
+    options.toleranceMm ?? DEFAULT_SECTION_TOLERANCE_MM,
+  );
+  const style = loadCurrentEditorStyle('shape');
+  const path = createSectionPath(profile, {
+    fill: style.fill === 'transparent' || style.fill === '' ? '#d9eaf7' : style.fill,
+    stroke: style.stroke,
+    strokeWidth: style.strokeWidth,
+    opacity: style.opacity,
+    strokeDashArray: style.strokeDashArray ? [...style.strokeDashArray] : undefined,
+    name: options.name,
+  });
+  assignNewObjectId(path, 'sectionProfile');
+  path.setPositionByOrigin(canvas.getVpCenter(), 'center', 'center');
+  path.setCoords();
+
+  return executeCanvasTransaction(
+    { canvas, pushHistory },
+    () => {
+      canvas.discardActiveObject();
+      canvas.add(path);
+      canvas.setActiveObject(path);
+      return path;
+    },
+    { semanticUpdate: 'none' },
+  );
 }
 
 /** Converts all selected supported closed shapes into one unioned section. */
