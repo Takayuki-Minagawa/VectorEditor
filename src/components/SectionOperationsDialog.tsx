@@ -313,132 +313,132 @@ export default function SectionOperationsDialog({ onClose }: SectionOperationsDi
           aria-labelledby="section-tab-edit"
           hidden={activeTab !== 'edit'}
         >
-            <p className="section-dialog-help">{t('sectionSelectionRequired')}</p>
-            <div className="section-operation-grid">
-              <button
-                className="toolbar-btn"
-                onClick={() => run(() => { createSectionFromSelection(canvas!, pushHistory, options); })}
-              >
-                {t('sectionCreate')}
-              </button>
-              <button
-                className="toolbar-btn"
-                onClick={() => run(() => { unionSelectionAsSection(canvas!, pushHistory, options); })}
-              >
-                {t('sectionUnion')}
-              </button>
-              <button
-                className="toolbar-btn"
-                onClick={() => run(() => { subtractSelectionFromSection(canvas!, pushHistory, options); })}
-              >
-                {t('sectionSubtract')}
-              </button>
-              <button
-                className="toolbar-btn"
-                disabled={selectedCornerReferences.length === 0}
-                onClick={() => run(() => {
-                  filletSelectedSection(canvas!, pushHistory, radiusMm, {
-                    ...options,
-                    filletCorners: selectedCornerReferences,
-                  });
-                })}
-              >
-                {t('sectionFillet')}
-              </button>
-            </div>
-
-            <NumberField
-              label={t('sectionTolerance')}
-              value={toleranceMm}
-              onChange={setToleranceMm}
-              min={0.000001}
-              max={10}
-              step={0.001}
-            />
-            <NumberField
-              label={t('sectionRadius')}
-              value={radiusMm}
-              onChange={setRadiusMm}
-              min={0.000001}
-              step={1}
-            />
-            <section className="section-corner-picker" aria-labelledby="section-corner-picker-title">
-          <div className="section-corner-picker-header">
-            <strong id="section-corner-picker-title">
-              {t('sectionFilletCorners')} ({selectedCorners.length}/{cornerState.corners.length})
-            </strong>
-            <span className="section-corner-actions">
-              <button
-                type="button"
-                onClick={() => updateSelectedCornerKeys(cornerState.corners.map(cornerKey))}
-                disabled={cornerState.corners.length === 0}
-              >
-                {t('sectionSelectAllCorners')}
-              </button>
-              <button
-                type="button"
-                onClick={() => updateSelectedCornerKeys([])}
-                disabled={selectedCornerKeys.length === 0}
-              >
-                {t('sectionClearCorners')}
-              </button>
-            </span>
-          </div>
-          {cornerState.corners.length > 0 ? (
-            <div className="section-corner-list">
-              {cornerState.corners.map((corner) => {
-                const key = cornerKey(corner);
-                return (
-                  <label key={key} className="section-corner-row">
-                    <input
-                      type="checkbox"
-                      checked={selectedKeySet.has(key)}
-                      onChange={(event) => updateSelectedCornerKeys(
-                        event.target.checked
-                          ? [...selectedCornerKeys, key]
-                          : selectedCornerKeys.filter((currentKey) => currentKey !== key),
-                      )}
-                    />
-                    <span>
-                      {t('sectionCorner')} {corner.vertexIndex + 1}
-                      {' · '}
-                      ({displayMillimetres(corner.point.x)}, {displayMillimetres(corner.point.y)}) mm
-                    </span>
-                    <small>R≤{displayMillimetres(corner.maxRadiusMm)}</small>
-                  </label>
-                );
+          <p className="section-dialog-help">{t('sectionSelectionRequired')}</p>
+          <div className="section-operation-grid">
+            <button
+              className="toolbar-btn"
+              onClick={() => run(() => { createSectionFromSelection(canvas!, pushHistory, options); })}
+            >
+              {t('sectionCreate')}
+            </button>
+            <button
+              className="toolbar-btn"
+              onClick={() => run(() => { unionSelectionAsSection(canvas!, pushHistory, options); })}
+            >
+              {t('sectionUnion')}
+            </button>
+            <button
+              className="toolbar-btn"
+              onClick={() => run(() => { subtractSelectionFromSection(canvas!, pushHistory, options); })}
+            >
+              {t('sectionSubtract')}
+            </button>
+            <button
+              className="toolbar-btn"
+              disabled={selectedCornerReferences.length === 0}
+              onClick={() => run(() => {
+                filletSelectedSection(canvas!, pushHistory, radiusMm, {
+                  ...options,
+                  filletCorners: selectedCornerReferences,
+                });
               })}
+            >
+              {t('sectionFillet')}
+            </button>
+          </div>
+
+          <NumberField
+            label={t('sectionTolerance')}
+            value={toleranceMm}
+            onChange={setToleranceMm}
+            min={0.000001}
+            max={10}
+            step={0.001}
+          />
+          <NumberField
+            label={t('sectionRadius')}
+            value={radiusMm}
+            onChange={setRadiusMm}
+            min={0.000001}
+            step={1}
+          />
+          <section className="section-corner-picker" aria-labelledby="section-corner-picker-title">
+            <div className="section-corner-picker-header">
+              <strong id="section-corner-picker-title">
+                {t('sectionFilletCorners')} ({selectedCorners.length}/{cornerState.corners.length})
+              </strong>
+              <span className="section-corner-actions">
+                <button
+                  type="button"
+                  onClick={() => updateSelectedCornerKeys(cornerState.corners.map(cornerKey))}
+                  disabled={cornerState.corners.length === 0}
+                >
+                  {t('sectionSelectAllCorners')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateSelectedCornerKeys([])}
+                  disabled={selectedCornerKeys.length === 0}
+                >
+                  {t('sectionClearCorners')}
+                </button>
+              </span>
             </div>
-          ) : (
-            <p className="section-dialog-help">
-              {cornerState.readError === 'unsupported-fillet'
-                ? t('sectionFilletExactOnly')
-                : cornerState.readError === 'selection'
-                  ? t('sectionCornerSelectionHint')
-                  : t('sectionNoConvexCorners')}
-            </p>
-          )}
-          {previewState.maximumRadiusMm !== null && (
-            <p className="section-preview-status">
-              {t('sectionSelectedMaximumRadius')}: {displayMillimetres(previewState.maximumRadiusMm)} mm
-            </p>
-          )}
-          {previewState.profile && (
-            <p className="section-preview-status">{t('sectionFilletPreview')}</p>
-          )}
-          {previewState.previewError && selectedCornerReferences.length > 0 && (
-            <p className="section-warning">{previewState.previewError}</p>
-          )}
-            </section>
-            <label className="section-checkbox-row">
-              <input
-                type="checkbox"
-                checked={keepSources}
-                onChange={(event) => setKeepSources(event.target.checked)}
-              />
-              <span>{t('sectionKeepSources')}</span>
-            </label>
-            {error && <p className="section-error" role="alert">{error}</p>}
+            {cornerState.corners.length > 0 ? (
+              <div className="section-corner-list">
+                {cornerState.corners.map((corner) => {
+                  const key = cornerKey(corner);
+                  return (
+                    <label key={key} className="section-corner-row">
+                      <input
+                        type="checkbox"
+                        checked={selectedKeySet.has(key)}
+                        onChange={(event) => updateSelectedCornerKeys(
+                          event.target.checked
+                            ? [...selectedCornerKeys, key]
+                            : selectedCornerKeys.filter((currentKey) => currentKey !== key),
+                        )}
+                      />
+                      <span>
+                        {t('sectionCorner')} {corner.vertexIndex + 1}
+                        {' · '}
+                        ({displayMillimetres(corner.point.x)}, {displayMillimetres(corner.point.y)}) mm
+                      </span>
+                      <small>R≤{displayMillimetres(corner.maxRadiusMm)}</small>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="section-dialog-help">
+                {cornerState.readError === 'unsupported-fillet'
+                  ? t('sectionFilletExactOnly')
+                  : cornerState.readError === 'selection'
+                    ? t('sectionCornerSelectionHint')
+                    : t('sectionNoConvexCorners')}
+              </p>
+            )}
+            {previewState.maximumRadiusMm !== null && (
+              <p className="section-preview-status">
+                {t('sectionSelectedMaximumRadius')}: {displayMillimetres(previewState.maximumRadiusMm)} mm
+              </p>
+            )}
+            {previewState.profile && (
+              <p className="section-preview-status">{t('sectionFilletPreview')}</p>
+            )}
+            {previewState.previewError && selectedCornerReferences.length > 0 && (
+              <p className="section-warning">{previewState.previewError}</p>
+            )}
+          </section>
+          <label className="section-checkbox-row">
+            <input
+              type="checkbox"
+              checked={keepSources}
+              onChange={(event) => setKeepSources(event.target.checked)}
+            />
+            <span>{t('sectionKeepSources')}</span>
+          </label>
+          {error && <p className="section-error" role="alert">{error}</p>}
         </div>
       </div>
     </Dialog>

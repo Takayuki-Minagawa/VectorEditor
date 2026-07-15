@@ -134,7 +134,7 @@ export default function StandardSectionGenerator({
         } as const;
         setError(t(errorKeys[caught.code]));
       } else {
-        setError(caught instanceof Error ? caught.message : t('standardSectionInvalid'));
+        setError(t('standardSectionInvalid'));
       }
       showToast(t('standardSectionInvalid'), 'error');
     }

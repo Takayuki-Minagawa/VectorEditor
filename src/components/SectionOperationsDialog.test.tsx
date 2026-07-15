@@ -305,6 +305,22 @@ describe('SectionOperationsDialog fillet UI', () => {
     expect(showToast).toHaveBeenCalledWith('断面寸法を確認してください。', 'error');
   });
 
+  it('does not expose unexpected internal error details', async () => {
+    const user = userEvent.setup();
+    const harness = createCanvasHarness();
+    sectionMocks.createStandard.mockImplementation(() => {
+      throw new Error('Internal geometry failure');
+    });
+    renderDialog(harness);
+
+    await user.click(screen.getByRole('tab', { name: '基本形状から生成' }));
+    await user.click(screen.getByRole('button', { name: '断面形状を生成' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('断面寸法を確認してください。');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Internal geometry failure');
+    expect(showToast).toHaveBeenCalledWith('断面寸法を確認してください。', 'error');
+  });
+
   it('selects all four corners initially and sends three references after one is cleared', async () => {
     const user = userEvent.setup();
     const harness = createCanvasHarness();
