@@ -30,6 +30,16 @@ export interface SectionProfileData {
   approximate: boolean;
 }
 
+/**
+ * A detached SectionProfileData copy whose rings have canonical closure and
+ * winding. This brand keeps low-level topology checks from accidentally being
+ * called with an unnormalised profile.
+ */
+declare const normalizedSectionProfileBrand: unique symbol;
+export type NormalizedSectionProfileData = SectionProfileData & {
+  readonly [normalizedSectionProfileBrand]: true;
+};
+
 export interface SectionBounds {
   minX: number;
   minY: number;
@@ -364,7 +374,7 @@ export function assertValidSectionProfileData(value: unknown): asserts value is 
 }
 
 /** Returns a detached profile with canonical point closure and ring winding. */
-export function normalizeSectionProfileData(value: SectionProfileData): SectionProfileData {
+export function normalizeSectionProfileData(value: SectionProfileData): NormalizedSectionProfileData {
   assertValidSectionProfileData(value);
 
   const rings = value.rings.map((ring) => {
@@ -382,5 +392,5 @@ export function normalizeSectionProfileData(value: SectionProfileData): SectionP
     rings,
     analysisToleranceMm: value.analysisToleranceMm,
     approximate: value.approximate,
-  };
+  } as NormalizedSectionProfileData;
 }

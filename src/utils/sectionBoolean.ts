@@ -14,6 +14,7 @@ import { pointInRing } from '../domain/sectionGeometryPredicates';
 export type SectionBooleanErrorCode =
   | 'empty-input'
   | 'invalid-input'
+  | 'numerical-instability'
   | 'no-intersection'
   | 'empty-result';
 
@@ -217,7 +218,13 @@ export function differenceSectionProfiles(
   // approximation tolerance.
   const comparisonScale = Math.max(1, Math.abs(subjectArea), Math.abs(resultArea));
   const overlapEpsilon = comparisonScale * Number.EPSILON * 256;
-  if (!Number.isFinite(removedArea) || removedArea <= overlapEpsilon) {
+  if (!Number.isFinite(removedArea) || removedArea < 0) {
+    throw new SectionBooleanError(
+      'numerical-instability',
+      'The section difference produced a non-physical area increase. Simplify the input geometry and retry.',
+    );
+  }
+  if (removedArea <= overlapEpsilon) {
     throw new SectionBooleanError(
       'no-intersection',
       'The cutter does not overlap the section material.',

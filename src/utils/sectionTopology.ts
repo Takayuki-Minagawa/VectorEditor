@@ -6,6 +6,7 @@ import {
   sectionBoundsCentre,
   sectionProfileBounds,
   signedSectionRingArea,
+  type NormalizedSectionProfileData,
   type SectionPoint,
   type SectionProfileData,
   type SectionRing,
@@ -144,7 +145,7 @@ function rememberValidTopology(key: string): void {
  * simple boundaries, hole containment, and non-overlapping material/void
  * regions. Point/line contact between separate material outers is allowed.
  */
-export function assertValidNormalizedSectionProfileTopology(profile: SectionProfileData): void {
+export function assertValidNormalizedSectionProfileTopology(profile: NormalizedSectionProfileData): void {
   const cacheKey = topologyCacheKey(profile);
   if (hasCachedTopology(cacheKey)) return;
 
@@ -212,7 +213,7 @@ export function assertValidNormalizedSectionProfileTopology(profile: SectionProf
 /** Normalizes exactly once, validates topology, and returns the analyzed copy. */
 export function normalizeAndAssertValidSectionProfileTopology(
   value: SectionProfileData,
-): SectionProfileData {
+): NormalizedSectionProfileData {
   const profile = normalizeSectionProfileData(value);
   assertValidNormalizedSectionProfileTopology(profile);
   return profile;

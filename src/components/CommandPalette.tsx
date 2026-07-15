@@ -16,6 +16,7 @@ import {
   subtractSelectionFromSection,
   unionSelectionAsSection,
 } from '../utils/sectionCommands';
+import { isSupportedSectionSourceObject } from '../utils/sectionGeometry';
 import { openSectionOperations } from '../utils/sectionUiEvents';
 import Dialog from './Dialog';
 
@@ -47,7 +48,8 @@ export default function CommandPalette() {
   const historyIndex = useEditorStore((state) => state.historyIndex);
   const historyLength = useEditorStore((state) => state.history.length);
   const isRestoring = useEditorStore((state) => state.isRestoring);
-  const selectionCount = useEditorStore((state) => state.selectedObjectIds.length);
+  const selectedObjectIds = useEditorStore((state) => state.selectedObjectIds);
+  const selectionCount = selectedObjectIds.length;
   const setActiveTool = useEditorStore((state) => state.setActiveTool);
   const toggleGrid = useEditorStore((state) => state.toggleGrid);
   const toggleSnap = useEditorStore((state) => state.toggleSnap);
@@ -82,6 +84,11 @@ export default function CommandPalette() {
     perform();
     setOpen(false);
   };
+
+  const canFillet = !!canvas
+    && selectionCount === 1
+    && !!canvas.getActiveObject()
+    && isSupportedSectionSourceObject(canvas.getActiveObject()!);
 
   const actions = useMemo<EditorAction[]>(() => {
     const runSectionCommand = (operation: () => void) => {
@@ -148,7 +155,7 @@ export default function CommandPalette() {
         id: 'section-fillet',
         label: t('sectionFillet'),
         keywords: 'section profile fillet radius corner R 角丸',
-        disabled: !canvas || drawingMode !== 'cad' || selectionCount !== 1,
+        disabled: !canvas || drawingMode !== 'cad' || !canFillet,
         perform: openSectionOperations,
       },
     ];
@@ -161,7 +168,7 @@ export default function CommandPalette() {
         perform: () => setActiveTool(tool.tool),
       })),
     ];
-  }, [canvas, clipboard, drawingMode, historyIndex, historyLength, isRestoring, pushHistory, redo, selectionCount, setActiveTool, setClipboard, showToast, t, toggleGrid, toggleLeftPanel, toggleOrtho, toggleRightPanel, toggleRulers, toggleSnap, toggleSnapToObjects, toggleTheme, undo]);
+  }, [canFillet, canvas, clipboard, drawingMode, historyIndex, historyLength, isRestoring, pushHistory, redo, selectionCount, setActiveTool, setClipboard, showToast, t, toggleGrid, toggleLeftPanel, toggleOrtho, toggleRightPanel, toggleRulers, toggleSnap, toggleSnapToObjects, toggleTheme, undo]);
 
   const filtered = useMemo(() => {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);

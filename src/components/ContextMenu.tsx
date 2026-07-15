@@ -19,6 +19,7 @@ import {
   subtractSelectionFromSection,
   unionSelectionAsSection,
 } from '../utils/sectionCommands';
+import { isSupportedSectionSourceObject } from '../utils/sectionGeometry';
 import { openSectionOperations } from '../utils/sectionUiEvents';
 
 interface MenuPos { x: number; y: number; }
@@ -69,6 +70,7 @@ export default function ContextMenu() {
   const hasSelection = !!active;
   const isGroup = active instanceof fabric.Group;
   const isMultiple = active instanceof fabric.ActiveSelection;
+  const canFillet = !!active && !isMultiple && isSupportedSectionSourceObject(active);
 
   const exec = (fn: () => void) => { fn(); close(); };
 
@@ -128,7 +130,7 @@ export default function ContextMenu() {
               <button className="context-item" onClick={handleSectionCreate}>{t('ctx_sectionCreate')}</button>
               {isMultiple && <button className="context-item" onClick={handleSectionUnion}>{t('ctx_sectionUnion')}</button>}
               {isMultiple && <button className="context-item" onClick={handleSectionSubtract}>{t('ctx_sectionSubtract')}</button>}
-              {!isMultiple && <button className="context-item" onClick={handleSectionFillet}>{t('ctx_sectionFillet')}</button>}
+              {canFillet && <button className="context-item" onClick={handleSectionFillet}>{t('ctx_sectionFillet')}</button>}
             </>
           )}
           <div className="context-divider" />

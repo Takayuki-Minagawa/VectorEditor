@@ -56,4 +56,15 @@ describe('ContextMenu section operations', () => {
 
     expect(screen.getByRole('button', { name: '凸角にRを設定…' })).toBeInTheDocument();
   });
+
+  it('does not offer fillet for a non-section object', () => {
+    const harness = createCanvasHarness(new fabric.IText('annotation'));
+    useI18n.getState().setLang('ja');
+    useEditorStore.setState({ canvas: harness.canvas, drawingMode: 'cad' });
+    render(<ContextMenu />);
+
+    act(() => harness.fireContextMenu());
+
+    expect(screen.queryByRole('button', { name: '凸角にRを設定…' })).not.toBeInTheDocument();
+  });
 });

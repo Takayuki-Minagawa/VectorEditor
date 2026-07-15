@@ -347,6 +347,21 @@ function readLocalProfileMetadata(object: fabric.FabricObject): SectionProfileDa
   }
 }
 
+/** Whether an object can be converted into a section profile without selection state. */
+export function isSupportedSectionSourceObject(object: fabric.FabricObject): boolean {
+  const metadata = getFabricMetadata(object);
+  if (metadata.objectKind === 'sectionProfile' && metadata.sectionProfileData) return true;
+  if (object instanceof fabric.ActiveSelection) return false;
+  if (object instanceof fabric.Group) {
+    const children = object.getObjects();
+    return children.length > 0 && children.every(isSupportedSectionSourceObject);
+  }
+  return object instanceof fabric.Rect
+    || object instanceof fabric.Circle
+    || object instanceof fabric.Ellipse
+    || object instanceof fabric.Polygon;
+}
+
 /** Applies a complete Fabric matrix while retaining section x-right/y-up coordinates. */
 export function transformSectionProfile(
   profile: SectionProfileData,
