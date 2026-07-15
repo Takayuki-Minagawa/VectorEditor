@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SectionProfileData } from '../domain/section';
+
+const clippingSpies = vi.hoisted(() => ({
+  difference: vi.fn(),
+}));
 
 vi.mock('polygon-clipping', async (importOriginal) => {
   const actual = await importOriginal<typeof import('polygon-clipping')>();
@@ -8,9 +12,7 @@ vi.mock('polygon-clipping', async (importOriginal) => {
     ...actual,
     default: {
       ...implementation,
-      difference: vi.fn(() => [[[
-        [0, 0], [20, 0], [20, 10], [0, 10], [0, 0],
-      ]]]),
+      difference: clippingSpies.difference,
     },
   };
 });
@@ -34,13 +36,36 @@ function rectangle(minX: number, minY: number, maxX: number, maxY: number): Sect
   };
 }
 
+function resultRectangle(width: number) {
+  return [[[
+    [0, 0], [width, 0], [width, 10], [0, 10], [0, 0],
+  ]]];
+}
+
 describe('section Boolean validation', () => {
+  beforeEach(() => {
+    clippingSpies.difference.mockReset();
+  });
+
   it('reports a non-physical difference area increase separately from no intersection', () => {
+    clippingSpies.difference.mockReturnValue(resultRectangle(20));
+
     expect(() => differenceSectionProfiles(
       rectangle(0, 0, 10, 10),
       rectangle(2, 2, 8, 8),
     )).toThrowError(expect.objectContaining<Partial<SectionBooleanError>>({
       code: 'numerical-instability',
+    }));
+  });
+
+  it('treats an area increase within floating-point tolerance as no intersection', () => {
+    clippingSpies.difference.mockReturnValue(resultRectangle(10.0000000000002));
+
+    expect(() => differenceSectionProfiles(
+      rectangle(0, 0, 10, 10),
+      rectangle(2, 2, 8, 8),
+    )).toThrowError(expect.objectContaining<Partial<SectionBooleanError>>({
+      code: 'no-intersection',
     }));
   });
 });
