@@ -74,6 +74,35 @@ async function exportCurrentDrawing(page: Page, format: 'svg' | 'png' | 'pdf'): 
   return readFile(path);
 }
 
+test('generates a dimension-driven H-section and preserves it through history', async ({ page }) => {
+  await openCadEditorInJapanese(page);
+  await page.locator('.toolbar').getByRole('button', { name: '断面', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '断面の作成・編集' });
+  await expect(dialog.locator('#section-panel-standard')).toBeVisible();
+  await expect(dialog.locator('#section-panel-edit')).toBeHidden();
+  await dialog.getByRole('tab', { name: '選択形状を編集' }).click();
+  await expect(dialog.locator('#section-panel-standard')).toBeHidden();
+  await expect(dialog.locator('#section-panel-edit')).toBeVisible();
+  await dialog.getByRole('tab', { name: '基本形状から生成' }).click();
+  await expect(dialog.locator('#section-panel-standard')).toBeVisible();
+  await expect(dialog.locator('#section-panel-edit')).toBeHidden();
+  await dialog.getByRole('combobox', { name: '断面種類' }).selectOption('h-section');
+  await dialog.getByRole('button', { name: '断面形状を生成' }).click();
+  await expect(page.getByText('基本断面を生成しました。')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await expect(layersNamed(page, 'H形鋼')).toHaveCount(1);
+  expect(await selectedSectionArea(page)).toBeCloseTo(4_533, 5);
+
+  await page.locator('.toolbar').getByRole('button', { name: '戻す', exact: true }).click();
+  await expect(layersNamed(page, 'H形鋼')).toHaveCount(0);
+
+  await page.locator('.toolbar').getByRole('button', { name: 'やり直し', exact: true }).click();
+  await expect(layersNamed(page, 'H形鋼')).toHaveCount(1);
+  await layersNamed(page, 'H形鋼').click();
+  expect(await selectedSectionArea(page)).toBeCloseTo(4_533, 5);
+});
+
 test('creates a CAD section, shows its properties, and preserves it through history and JSON reload', async ({ page }) => {
   await openCadEditorInJapanese(page);
   await drawRectangle(page);

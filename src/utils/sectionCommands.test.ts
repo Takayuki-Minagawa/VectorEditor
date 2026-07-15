@@ -5,6 +5,7 @@ import { getFabricMetadata } from './fabricObjectMetadata';
 import { calculateSectionProperties } from './sectionProperties';
 import { readSectionProfileInDocumentCoordinates } from './sectionGeometry';
 import {
+  createStandardSectionOnCanvas,
   createSectionFromSelection,
   filletSelectedSection,
   getSelectedSectionMaximumFilletRadius,
@@ -20,6 +21,53 @@ function select(canvas: fabric.Canvas, objects: fabric.FabricObject[]): void {
 }
 
 describe('section commands', () => {
+  it('creates a dimension-driven section at the viewport centre in one history commit', () => {
+    const canvas = new fabric.Canvas();
+    canvas.setDimensions({ width: 800, height: 600 });
+    const history = vi.fn();
+
+    const result = createStandardSectionOnCanvas(canvas, history, {
+      kind: 'rectangular-hollow',
+      heightMm: 200,
+      widthMm: 150,
+      thicknessMm: 8,
+    }, { name: 'Rectangular hollow section' });
+    const properties = calculateSectionProperties(readSectionProfileInDocumentCoordinates(result));
+
+    expect(canvas.getObjects()).toEqual([result]);
+    expect(canvas.getActiveObject()).toBe(result);
+    expect(result.getCenterPoint().x).toBeCloseTo(400, 8);
+    expect(result.getCenterPoint().y).toBeCloseTo(300, 8);
+    expect(getFabricMetadata(result)).toMatchObject({
+      objectKind: 'sectionProfile',
+      name: 'Rectangular hollow section',
+    });
+    expect(properties.area).toBeCloseTo(5_344, 8);
+    expect(history).toHaveBeenCalledTimes(1);
+    canvas.dispose();
+  });
+
+  it('creates a standard section at the visible centre after pan and zoom', () => {
+    const canvas = new fabric.Canvas();
+    canvas.setDimensions({ width: 800, height: 600 });
+    canvas.setViewportTransform([2, 0, 0, 2, -300, -200]);
+    const expectedCentre = canvas.getVpCenter();
+
+    const result = createStandardSectionOnCanvas(canvas, vi.fn(), {
+      kind: 'h-section',
+      heightMm: 300,
+      widthMm: 150,
+      webThicknessMm: 6.5,
+      flangeThicknessMm: 9,
+    });
+
+    expect(expectedCentre.x).toBeCloseTo(350, 8);
+    expect(expectedCentre.y).toBeCloseTo(250, 8);
+    expect(result.getCenterPoint().x).toBeCloseTo(expectedCentre.x, 8);
+    expect(result.getCenterPoint().y).toBeCloseTo(expectedCentre.y, 8);
+    canvas.dispose();
+  });
+
   it('unions selected material in one history commit', () => {
     const canvas = new fabric.Canvas();
     const first = new fabric.Rect({ left: 0, top: 0, width: 100, height: 100 });

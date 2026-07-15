@@ -5,9 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SectionProfileData } from '../domain/section';
 import { useI18n } from '../i18n/useI18n';
 import { useEditorStore } from '../store/useEditorStore';
+import {
+  DEFAULT_STANDARD_SECTION_SPECS,
+  StandardSectionTemplateError,
+  type StandardSectionKind,
+} from '../utils/sectionProfileTemplates';
 import SectionOperationsDialog from './SectionOperationsDialog';
 
 const sectionMocks = vi.hoisted(() => ({
+  createStandard: vi.fn(),
   create: vi.fn(),
   union: vi.fn(),
   subtract: vi.fn(),
@@ -19,6 +25,7 @@ const sectionMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../utils/sectionCommands', () => ({
+  createStandardSectionOnCanvas: sectionMocks.createStandard,
   createSectionFromSelection: sectionMocks.create,
   unionSelectionAsSection: sectionMocks.union,
   subtractSelectionFromSection: sectionMocks.subtract,
@@ -123,6 +130,7 @@ describe('SectionOperationsDialog fillet UI', () => {
   const showToast = vi.fn();
 
   beforeEach(() => {
+    sectionMocks.createStandard.mockReset();
     sectionMocks.create.mockReset();
     sectionMocks.union.mockReset();
     sectionMocks.subtract.mockReset();
@@ -154,6 +162,164 @@ describe('SectionOperationsDialog fillet UI', () => {
     });
     return render(<SectionOperationsDialog onClose={vi.fn()} />);
   }
+
+  it('switches basic section dimensions and generates an H-section', async () => {
+    const user = userEvent.setup();
+    const harness = createCanvasHarness();
+    renderDialog(harness);
+
+    await user.click(screen.getByRole('tab', { name: '基本形状から生成' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: '断面種類' }), 'h-section');
+
+    const heightInput = screen.getByRole('spinbutton', { name: 'せい H (mm)' });
+    await user.clear(heightInput);
+    await user.type(heightInput, '400');
+    await user.click(screen.getByRole('tab', { name: '選択形状を編集' }));
+    await user.click(screen.getByRole('tab', { name: '基本形状から生成' }));
+    expect(screen.getByRole('spinbutton', { name: 'せい H (mm)' })).toHaveValue(400);
+    await user.click(screen.getByRole('button', { name: '断面形状を生成' }));
+
+    expect(sectionMocks.createStandard).toHaveBeenCalledWith(
+      harness.canvas,
+      pushHistory,
+      {
+        kind: 'h-section',
+        heightMm: 400,
+        widthMm: 150,
+        webThicknessMm: 6.5,
+        flangeThicknessMm: 9,
+      },
+      { toleranceMm: 0.01, name: 'H形鋼' },
+    );
+    expect(showToast).toHaveBeenCalledWith('基本断面を生成しました。', 'success');
+  });
+
+  it.each([
+    {
+      kind: 'rectangular-hollow',
+      name: '角形鋼管',
+      fields: [['せい H (mm)', 200], ['幅 B (mm)', 200], ['板厚 t (mm)', 9]],
+    },
+    {
+      kind: 'circular-hollow',
+      name: '鋼管',
+      fields: [['外径 D (mm)', 216.3], ['板厚 t (mm)', 8.2]],
+    },
+    {
+      kind: 'h-section',
+      name: 'H形鋼',
+      fields: [
+        ['せい H (mm)', 300],
+        ['幅 B (mm)', 150],
+        ['ウェブ厚 tw (mm)', 6.5],
+        ['フランジ厚 tf (mm)', 9],
+      ],
+    },
+    {
+      kind: 'channel',
+      name: '溝形鋼',
+      fields: [
+        ['せい H (mm)', 200],
+        ['幅 B (mm)', 75],
+        ['ウェブ厚 tw (mm)', 5.5],
+        ['フランジ厚 tf (mm)', 9],
+      ],
+    },
+    {
+      kind: 'lipped-channel',
+      name: 'リップ溝形鋼',
+      fields: [
+        ['せい H (mm)', 150],
+        ['幅 B (mm)', 50],
+        ['リップ長 C (mm)', 20],
+        ['板厚 t (mm)', 2.3],
+      ],
+    },
+  ] satisfies Array<{
+    kind: StandardSectionKind;
+    name: string;
+    fields: Array<[string, number]>;
+  }>)('maps the $name fields and defaults to the generated profile', async ({ kind, name, fields }) => {
+    const user = userEvent.setup();
+    const harness = createCanvasHarness();
+    renderDialog(harness);
+
+    await user.click(screen.getByRole('tab', { name: '基本形状から生成' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: '断面種類' }), kind);
+    fields.forEach(([label, value]) => {
+      expect(screen.getByRole('spinbutton', { name: label })).toHaveValue(value);
+    });
+    await user.click(screen.getByRole('button', { name: '断面形状を生成' }));
+
+    expect(sectionMocks.createStandard).toHaveBeenCalledWith(
+      harness.canvas,
+      pushHistory,
+      DEFAULT_STANDARD_SECTION_SPECS[kind],
+      { toleranceMm: 0.01, name },
+    );
+  });
+
+  it('supports roving tab focus and blocks incomplete dimension drafts', async () => {
+    const user = userEvent.setup();
+    const harness = createCanvasHarness();
+    renderDialog(harness);
+
+    const editTab = screen.getByRole('tab', { name: '選択形状を編集' });
+    const standardTab = screen.getByRole('tab', { name: '基本形状から生成' });
+    expect(editTab).toHaveFocus();
+    expect(editTab).toHaveAttribute('tabindex', '0');
+    expect(standardTab).toHaveAttribute('tabindex', '-1');
+
+    await user.keyboard('{Home}');
+    expect(standardTab).toHaveFocus();
+    expect(standardTab).toHaveAttribute('aria-selected', 'true');
+
+    const heightInput = screen.getByRole('spinbutton', { name: 'せい H (mm)' });
+    await user.clear(heightInput);
+    expect(screen.getByRole('button', { name: '断面形状を生成' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '各寸法は0.000001 mm以上の有限値で入力してください。',
+    );
+    await user.type(heightInput, '0.0000001');
+    expect(heightInput).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: '断面形状を生成' })).toBeDisabled();
+    expect(sectionMocks.createStandard).not.toHaveBeenCalled();
+  });
+
+  it('localizes template constraint errors in Japanese', async () => {
+    const user = userEvent.setup();
+    const harness = createCanvasHarness();
+    sectionMocks.createStandard.mockImplementation(() => {
+      throw new StandardSectionTemplateError(
+        'pipe-thickness',
+        'Pipe thickness must satisfy 2t < D.',
+      );
+    });
+    renderDialog(harness);
+
+    await user.click(screen.getByRole('tab', { name: '基本形状から生成' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: '断面種類' }), 'circular-hollow');
+    await user.click(screen.getByRole('button', { name: '断面形状を生成' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('鋼管は 2t < D を満たす必要があります。');
+    expect(showToast).toHaveBeenCalledWith('断面寸法を確認してください。', 'error');
+  });
+
+  it('does not expose unexpected internal error details', async () => {
+    const user = userEvent.setup();
+    const harness = createCanvasHarness();
+    sectionMocks.createStandard.mockImplementation(() => {
+      throw new Error('Internal geometry failure');
+    });
+    renderDialog(harness);
+
+    await user.click(screen.getByRole('tab', { name: '基本形状から生成' }));
+    await user.click(screen.getByRole('button', { name: '断面形状を生成' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('断面寸法を確認してください。');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Internal geometry failure');
+    expect(showToast).toHaveBeenCalledWith('断面寸法を確認してください。', 'error');
+  });
 
   it('selects all four corners initially and sends three references after one is cleared', async () => {
     const user = userEvent.setup();
