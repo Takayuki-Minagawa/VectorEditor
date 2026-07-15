@@ -1,22 +1,37 @@
 import * as fabric from 'fabric';
 import type { ToolType } from '../types';
+import { getFabricMetadata } from './fabricObjectMetadata';
+import { loadCurrentEditorStyle } from './stylePresets';
 
 export function configureCanvasForTool(canvas: fabric.Canvas, tool: ToolType): void {
   const isPencil = tool === 'pencil';
   canvas.isDrawingMode = isPencil;
 
   if (isPencil) {
+    const style = loadCurrentEditorStyle('line');
     const brush = new fabric.PencilBrush(canvas);
-    brush.width = 2;
-    brush.color = '#1F4E79';
+    brush.width = style.strokeWidth;
+    brush.color = style.stroke;
     canvas.freeDrawingBrush = brush;
   }
 
   canvas.selection = tool === 'select';
   canvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
   canvas.forEachObject((obj) => {
-    obj.selectable = tool === 'select';
-    obj.evented = tool === 'select';
+    const selecting = tool === 'select';
+    const metadata = getFabricMetadata(obj);
+    const locked = metadata.locked ?? Boolean(
+      obj.lockMovementX
+      || obj.lockMovementY
+      || obj.lockScalingX
+      || obj.lockScalingY
+      || obj.lockRotation,
+    );
+    obj.set({
+      selectable: selecting,
+      evented: selecting,
+      hasControls: selecting && !locked,
+    });
   });
 
   if (tool !== 'select') {

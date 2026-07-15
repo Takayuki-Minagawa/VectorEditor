@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useI18n } from '../i18n/useI18n';
 import type { TranslationKeys } from '../i18n/ja';
+import Dialog from './Dialog';
 
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.1.0';
 
 interface Section {
   titleKey: TranslationKeys;
@@ -35,19 +36,15 @@ export default function HelpManual() {
         {t('helpBtn')}
       </button>
       {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div className="help-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <span>{t('helpTitle')}</span>
-              <button className="modal-close" onClick={() => setOpen(false)}>&times;</button>
-            </div>
+        <Dialog title={t('helpTitle')} onClose={() => setOpen(false)} closeLabel={t('measureClose')} className="help-dialog">
             <div className="help-body">
-              <nav className="help-nav">
+              <nav className="help-nav" aria-label={t('helpTitle')}>
                 {sections.map((sec, i) => (
                   <button
                     key={sec.titleKey}
                     className={`help-nav-item ${activeIdx === i ? 'active' : ''}`}
                     onClick={() => setActiveIdx(i)}
+                    aria-current={activeIdx === i ? 'page' : undefined}
                   >
                     {t(sec.titleKey)}
                   </button>
@@ -65,8 +62,7 @@ export default function HelpManual() {
             <div className="help-footer">
               {t('help_version')}: {APP_VERSION}
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </>
   );

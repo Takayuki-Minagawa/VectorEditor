@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useI18n } from '../i18n/useI18n';
+import Dialog from './Dialog';
 
 const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 const mod = isMac ? '\u2318' : 'Ctrl';
@@ -38,14 +39,9 @@ export default function ShortcutHelp() {
 
   return (
     <>
-      <button className="shortcut-help-btn" onClick={() => setOpen(true)} title={t('shortcutTitle')}>?</button>
+      <button className="shortcut-help-btn" onClick={() => setOpen(true)} title={t('shortcutTitle')} aria-label={t('shortcutTitle')}>?</button>
       {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <span>{t('shortcutTitle')}</span>
-              <button className="modal-close" onClick={() => setOpen(false)}>&times;</button>
-            </div>
+        <Dialog title={t('shortcutTitle')} onClose={() => setOpen(false)} closeLabel={t('measureClose')}>
             <div className="modal-body">
               {shortcuts.map((section) => (
                 <div key={section.category} className="shortcut-section">
@@ -59,8 +55,7 @@ export default function ShortcutHelp() {
                 </div>
               ))}
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </>
   );

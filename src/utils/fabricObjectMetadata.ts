@@ -1,0 +1,169 @@
+import * as fabric from 'fabric';
+import type { CadUnit } from '../types';
+
+/**
+ * Semantic anchors are stored in document coordinates.  `objectId` and
+ * `anchor` make the point associative, while x/y are a stable fallback when
+ * the referenced object no longer exists.
+ */
+export type ObjectAnchorKind =
+  | 'start'
+  | 'end'
+  | 'midpoint'
+  | 'center'
+  | 'topLeft'
+  | 'topRight'
+  | 'bottomRight'
+  | 'bottomLeft'
+  | 'top'
+  | 'right'
+  | 'bottom'
+  | 'left'
+  | 'vertex';
+
+export interface SemanticAnchor {
+  x: number;
+  y: number;
+  objectId?: string;
+  anchor?: ObjectAnchorKind;
+  vertexIndex?: number;
+}
+
+export interface DimensionData {
+  start: SemanticAnchor;
+  end: SemanticAnchor;
+  precision?: number;
+  unit?: CadUnit;
+}
+
+export type ConnectorRoute = 'straight' | 'elbow';
+
+export interface ConnectorData {
+  from: SemanticAnchor;
+  to: SemanticAnchor;
+  route: ConnectorRoute;
+}
+
+/** Properties whose meaning belongs to the document, not to the current UI. */
+export interface FabricSemanticMetadata {
+  id?: string;
+  name?: string;
+  objectKind?: string;
+  locked?: boolean;
+  dimensionData?: DimensionData;
+  connectorData?: ConnectorData;
+  latexSource?: string;
+  latexFontSize?: number;
+}
+
+export type FabricObjectWithMetadata = fabric.FabricObject & FabricSemanticMetadata;
+
+/**
+ * Keep this list typed so adding a serialised property requires adding its
+ * document type above.  Interaction-only fields such as selectable/evented
+ * intentionally do not appear here.
+ */
+export const FABRIC_CUSTOM_PROPERTIES = [
+  'id',
+  'name',
+  'objectKind',
+  'locked',
+  'dimensionData',
+  'connectorData',
+  'latexSource',
+  'latexFontSize',
+] as const satisfies readonly (keyof FabricSemanticMetadata)[];
+
+export function getFabricMetadata(object: fabric.FabricObject): FabricSemanticMetadata {
+  const metadata = object as FabricObjectWithMetadata;
+  return {
+    id: metadata.id,
+    name: metadata.name,
+    objectKind: metadata.objectKind,
+    locked: metadata.locked,
+    dimensionData: metadata.dimensionData,
+    connectorData: metadata.connectorData,
+    latexSource: metadata.latexSource,
+    latexFontSize: metadata.latexFontSize,
+  };
+}
+
+export function setFabricMetadata<K extends keyof FabricSemanticMetadata>(
+  object: fabric.FabricObject,
+  key: K,
+  value: FabricSemanticMetadata[K],
+): void {
+  Object.assign(object as FabricObjectWithMetadata, { [key]: value });
+}
+
+export function setFabricMetadataValues(
+  object: fabric.FabricObject,
+  values: Partial<FabricSemanticMetadata>,
+): void {
+  Object.assign(object as FabricObjectWithMetadata, values);
+}
+
+function visitObjects(
+  object: fabric.FabricObject,
+  visitor: (value: fabric.FabricObject) => void,
+): void {
+  visitor(object);
+  if (object instanceof fabric.Group || object instanceof fabric.ActiveSelection) {
+    object.getObjects().forEach((child) => visitObjects(child, visitor));
+  }
+}
+
+/**
+ * Bridge legacy lock flags to the persistent `locked` property immediately
+ * before serialisation.  This keeps documents produced by old UI call sites
+ * correct while those call sites migrate to the metadata helper.
+ */
+export function prepareObjectMetadataForSerialization(object: fabric.FabricObject): void {
+  visitObjects(object, (current) => {
+    const metadata = current as FabricObjectWithMetadata;
+    metadata.locked = Boolean(
+      current.lockMovementX
+      || current.lockMovementY
+      || current.lockScalingX
+      || current.lockScalingY
+      || current.lockRotation,
+    );
+  });
+}
+
+/** Rebuild transient Fabric interaction flags from persistent metadata. */
+export function applyPersistentObjectState(object: fabric.FabricObject): void {
+  visitObjects(object, (current) => {
+    const { locked = false } = current as FabricObjectWithMetadata;
+    current.set({
+      selectable: true,
+      evented: true,
+      lockMovementX: locked,
+      lockMovementY: locked,
+      lockScalingX: locked,
+      lockScalingY: locked,
+      lockRotation: locked,
+      hasControls: !locked,
+    });
+  });
+}
+
+export function setPersistentObjectLocked(
+  object: fabric.FabricObject,
+  locked: boolean,
+  recursive = true,
+): void {
+  const apply = (current: fabric.FabricObject): void => {
+    setFabricMetadata(current, 'locked', locked);
+    current.set({
+      lockMovementX: locked,
+      lockMovementY: locked,
+      lockScalingX: locked,
+      lockScalingY: locked,
+      lockRotation: locked,
+      hasControls: !locked,
+    });
+  };
+  if (recursive) visitObjects(object, apply);
+  else apply(object);
+}

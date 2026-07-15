@@ -1,5 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useId } from 'react';
+import 'katex/dist/katex.min.css';
 import { useI18n } from '../i18n/useI18n';
+import { useEditorStore } from '../store/useEditorStore';
+import { createAsyncCanvasMutationGuard } from '../utils/canvasCommands';
+import Dialog from './Dialog';
 
 interface Props {
   onPlace: (dataUrl: string, latex: string, fontSize: number) => void;
@@ -13,41 +17,36 @@ interface KatexApi {
   ) => string;
 }
 
-let katexCssLoaded = false;
-function ensureKatexCss(): void {
-  if (katexCssLoaded) return;
-  katexCssLoaded = true;
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  // Vite resolves node_modules CSS via import, but for dynamic loading
-  // we use a CDN link as fallback (KaTeX CSS from node_modules is also loaded via import below)
-  link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css';
-  link.crossOrigin = 'anonymous';
-  document.head.appendChild(link);
-}
-
 export default function LatexDialog({ onPlace, onCancel }: Props) {
   const t = useI18n((s) => s.t);
   const [latex, setLatex] = useState('E = mc^2');
-  const [fontSize, setFontSize] = useState(24);
+  const [fontSizeDraft, setFontSizeDraft] = useState('24');
   const [previewHtml, setPreviewHtml] = useState('');
   const [ready, setReady] = useState(false);
   const [placing, setPlacing] = useState(false);
   const katexRef = useRef<KatexApi | null>(null);
   const renderRef = useRef<HTMLDivElement>(null);
+  const formulaId = useId();
+  const fontSizeId = useId();
+  const previewId = useId();
+  const fontSize = Number(fontSizeDraft);
+  const validFontSize = Number.isFinite(fontSize) && fontSize >= 10 && fontSize <= 120;
 
   // Load KaTeX on mount
   useEffect(() => {
     let cancelled = false;
-    ensureKatexCss();
-    import('katex').then((mod) => {
-      if (!cancelled) {
-        katexRef.current = mod.default;
-        setReady(true);
-      }
-    });
+    import('katex')
+      .then((mod) => {
+        if (!cancelled) {
+          katexRef.current = mod.default;
+          setReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) useEditorStore.getState().showToast(t('latexRenderError'), 'error');
+      });
     return () => { cancelled = true; };
-  }, []);
+  }, [t]);
 
   // Update preview
   useEffect(() => {
@@ -64,12 +63,16 @@ export default function LatexDialog({ onPlace, onCancel }: Props) {
   }, [latex, ready]);
 
   const handlePlace = useCallback(async () => {
-    if (!renderRef.current || !katexRef.current || placing) return;
+    if (!renderRef.current || !katexRef.current || placing || !validFontSize) return;
+    const activeCanvas = useEditorStore.getState().canvas;
+    if (!activeCanvas) return;
+    const canCommit = createAsyncCanvasMutationGuard(activeCanvas);
     setPlacing(true);
+    let container: HTMLDivElement | null = null;
 
     try {
       // Create off-screen render container with exact styling
-      const container = document.createElement('div');
+      container = document.createElement('div');
       container.style.position = 'fixed';
       container.style.left = '-9999px';
       container.style.top = '0';
@@ -94,47 +97,48 @@ export default function LatexDialog({ onPlace, onCancel }: Props) {
         logging: false,
       });
 
-      document.body.removeChild(container);
-
       const dataUrl = canvas.toDataURL('image/png');
+      if (!canCommit()) return;
       onPlace(dataUrl, latex, fontSize);
     } catch (err) {
       console.error('LaTeX render error:', err);
+      useEditorStore.getState().showToast(t('latexRenderError'), 'error');
+    } finally {
+      container?.remove();
       setPlacing(false);
     }
-  }, [latex, fontSize, onPlace, placing]);
+  }, [latex, fontSize, onPlace, placing, t, validFontSize]);
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-content latex-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <span>{t('latexInput')}</span>
-          <button className="modal-close" onClick={onCancel}>&times;</button>
-        </div>
+    <Dialog title={t('latexInput')} onClose={onCancel} closeLabel={t('measureClose')} className="latex-dialog">
         <div className="modal-body">
           <div className="prop-row">
-            <label>{t('latexFormula')}</label>
+            <label htmlFor={formulaId}>{t('latexFormula')}</label>
           </div>
           <textarea
+            id={formulaId}
             className="latex-textarea"
             value={latex}
             onChange={(e) => setLatex(e.target.value)}
             rows={3}
             placeholder="E = mc^2"
             spellCheck={false}
+            data-autofocus
           />
           <div className="prop-row">
-            <label>{t('fontSize')}</label>
+            <label htmlFor={fontSizeId}>{t('fontSize')}</label>
             <input
+              id={fontSizeId}
               type="number"
-              value={fontSize}
-              onChange={(e) => setFontSize(Number(e.target.value))}
+              value={fontSizeDraft}
+              onChange={(e) => setFontSizeDraft(e.target.value)}
               min={10}
               max={120}
+              aria-invalid={!validFontSize}
             />
           </div>
-          <div className="latex-preview-label">{t('latexPreview')}</div>
-          <div className="latex-preview-area">
+          <div id={previewId} className="latex-preview-label">{t('latexPreview')}</div>
+          <div className="latex-preview-area" aria-labelledby={previewId}>
             <div
               ref={renderRef}
               className="latex-render"
@@ -147,7 +151,7 @@ export default function LatexDialog({ onPlace, onCancel }: Props) {
           <button
             className="toolbar-btn"
             onClick={handlePlace}
-            disabled={!ready || placing || latex.trim() === ''}
+            disabled={!ready || placing || latex.trim() === '' || !validFontSize}
           >
             {placing ? '...' : t('latexPlace')}
           </button>
@@ -155,7 +159,6 @@ export default function LatexDialog({ onPlace, onCancel }: Props) {
             {t('measureClose')}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

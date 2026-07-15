@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react';
 import * as fabric from 'fabric';
-import { useEditorStore } from '../store/useEditorStore';
+import { captureCurrentEditorSnapshot, useEditorStore } from '../store/useEditorStore';
+import { useUiStore } from '../store/useUiStore';
 import { useI18n } from '../i18n/useI18n';
-import { ensureObjectIdsRecursive } from '../utils/objectIds';
+import { reassignObjectIdsRecursive } from '../utils/objectIds';
 import {
+  createAsyncCanvasMutationGuard,
   deleteSelected,
   duplicateActive,
   selectAll,
@@ -11,24 +13,36 @@ import {
 } from '../utils/canvasCommands';
 import {
   createDocumentData,
+  isDocumentRestoreSupersededError,
   parseDocumentData,
   restoreDocumentData,
 } from '../utils/documentSerializer';
 import NumericMoveDialog from './NumericMoveDialog';
-import CadExportDialog from './CadExportDialog';
+import ExportDialog from './ExportDialog';
+import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
 
 type Alignment = 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom';
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file.'));
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function Toolbar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [showNumericMove, setShowNumericMove] = useState(false);
-  const [showCadExport, setShowCadExport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const canvas = useEditorStore((s) => s.canvas);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
   const historyIndex = useEditorStore((s) => s.historyIndex);
   const historyLength = useEditorStore((s) => s.history.length);
+  const isRestoring = useEditorStore((s) => s.isRestoring);
   const canvasWidth = useEditorStore((s) => s.canvasWidth);
   const canvasHeight = useEditorStore((s) => s.canvasHeight);
   const backgroundColor = useEditorStore((s) => s.backgroundColor);
@@ -47,6 +61,7 @@ export default function Toolbar() {
 
   const handleSaveJSON = () => {
     if (!canvas) return;
+    const state = useEditorStore.getState();
     const data = createDocumentData({
       canvas,
       canvasWidth,
@@ -57,6 +72,14 @@ export default function Toolbar() {
       scale,
       cadWidth,
       cadHeight,
+      gridVisible: state.gridVisible,
+      gridSize: state.gridSize,
+      snapToGrid: state.snapToGrid,
+      snapToObjects: state.snapToObjects,
+      showRulers: state.showRulers,
+      guides: state.guides,
+      snapToGuides: state.snapToGuides,
+      orthoMode: state.orthoMode,
     });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -72,146 +95,103 @@ export default function Toolbar() {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !canvas) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = parseDocumentData(ev.target?.result as string);
-        const { setCanvasSize, setBackgroundColor, setDrawingMode, setCadUnit, setScale, setCadSize } = useEditorStore.getState();
-        restoreDocumentData(canvas, data, {
-          setCanvasSize,
-          setBackgroundColor,
-          setDrawingMode,
-          setCadUnit,
-          setScale,
-          setCadSize,
-        }).then(() => {
-          pushHistory();
-          showToast(t('loadDone'), 'success');
-        }).catch(() => {
-          showToast(t('loadError'), 'error');
-        });
-      } catch {
-        showToast(t('loadError'), 'error');
-      }
-    };
-    reader.readAsText(file);
     e.target.value = '';
+    if (!file || !canvas) return;
+    // File reads can take long enough for another history/document restore to
+    // win ownership. Normal edits remain allowed; their latest state is
+    // captured only after parsing, immediately before restore begins.
+    const canStartRestore = createAsyncCanvasMutationGuard(canvas);
+    try {
+      const data = parseDocumentData(await file.text());
+      if (!canStartRestore()) return;
+      const rollbackSnapshot = captureCurrentEditorSnapshot() ?? undefined;
+      const {
+        setCanvasSize,
+        setBackgroundColor,
+        setDrawingMode,
+        setCadUnit,
+        setScale,
+        setCadSize,
+        restoreEditorSettings,
+      } = useEditorStore.getState();
+      // No await belongs between the ownership check / rollback capture and
+      // this call: restoreDocumentData claims the HistoryService generation
+      // synchronously before its first suspension point.
+      await restoreDocumentData(canvas, data, {
+        setCanvasSize,
+        setBackgroundColor,
+        setDrawingMode,
+        setCadUnit,
+        setScale,
+        setCadSize,
+        restoreEditorSettings,
+      }, {
+        rollbackSnapshot,
+      });
+      useUiStore.getState().setCurrentProjectId(null);
+      pushHistory();
+      showToast(t('loadDone'), 'success');
+    } catch (error: unknown) {
+      if (isDocumentRestoreSupersededError(error)) return;
+      showToast(t('loadError'), 'error');
+    }
   };
 
   const handleImport = () => {
     importInputRef.current?.click();
   };
 
-  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !canvas) return;
-    const reader = new FileReader();
-    const isSvg = file.type === 'image/svg+xml' || file.name.endsWith('.svg');
-
-    reader.onload = (ev) => {
-      try {
-        const result = ev.target?.result as string;
-        if (isSvg) {
-          // Import SVG as editable objects
-          fabric.loadSVGFromString(result).then((loaded) => {
-            const objects = loaded.objects.filter(Boolean) as fabric.FabricObject[];
-            if (objects.length === 0) return;
-            let obj: fabric.FabricObject;
-            if (objects.length === 1) {
-              obj = objects[0];
-            } else {
-              obj = new fabric.Group(objects);
-            }
-            ensureObjectIdsRecursive(obj);
-            canvas.add(obj);
-            canvas.setActiveObject(obj);
-            canvas.requestRenderAll();
-            pushHistory();
-          });
-        } else {
-          // Import raster image
-          fabric.Image.fromURL(result).then((img) => {
-            ensureObjectIdsRecursive(img);
-            // Scale down if larger than canvas
-            const maxW = canvas.width || 800;
-            const maxH = canvas.height || 600;
-            const imgW = img.width || 100;
-            const imgH = img.height || 100;
-            const scale = Math.min(1, maxW * 0.8 / imgW, maxH * 0.8 / imgH);
-            if (scale < 1) {
-              img.set({ scaleX: scale, scaleY: scale });
-            }
-            canvas.add(img);
-            canvas.setActiveObject(img);
-            canvas.requestRenderAll();
-            pushHistory();
-          });
-        }
-      } catch {
-        showToast(t('importError'), 'error');
-      }
-    };
-
-    if (isSvg) {
-      reader.readAsText(file);
-    } else {
-      reader.readAsDataURL(file);
-    }
     e.target.value = '';
-  };
+    if (!file || !canvas) return;
+    const isSvg = file.type === 'image/svg+xml' || file.name.endsWith('.svg');
+    const canCommit = createAsyncCanvasMutationGuard(canvas);
 
-  const handleExportSVG = () => {
-    if (!canvas) return;
-    const svg = canvas.toSVG();
-    const blob = new Blob([svg], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'vector-drawing.svg';
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast(t('exportDone'), 'success');
-  };
-
-  const handleExportPNG = () => {
-    if (!canvas) return;
-    const dataUrl = canvas.toDataURL({
-      format: 'png',
-      multiplier: 2,
-    });
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = 'vector-drawing.png';
-    a.click();
-    showToast(t('exportDone'), 'success');
-  };
-
-  const handleExportPDF = async () => {
-    if (!canvas) return;
-    const { jsPDF } = await import('jspdf');
-    await import('svg2pdf.js');
-
-    const svgStr = canvas.toSVG();
-    const parser = new DOMParser();
-    const svgDoc = parser.parseFromString(svgStr, 'image/svg+xml');
-    const svgEl = svgDoc.documentElement;
-
-    const w = canvasWidth;
-    const h = canvasHeight;
-    const orientation = w >= h ? 'landscape' : 'portrait';
-    const pdf = new jsPDF({
-      orientation,
-      unit: 'px',
-      format: [w, h],
-      hotfixes: ['px_scaling'],
-    });
-
-    await pdf.svg(svgEl, { x: 0, y: 0, width: w, height: h });
-    pdf.save('vector-drawing.pdf');
-    showToast(t('exportDone'), 'success');
+    try {
+      if (isSvg) {
+        const loaded = await fabric.loadSVGFromString(await file.text());
+        const objects = loaded.objects.filter(Boolean) as fabric.FabricObject[];
+        if (!canCommit()) {
+          objects.forEach((object) => object.dispose());
+          return;
+        }
+        if (objects.length === 0) throw new Error('SVG has no exportable objects.');
+        const object = objects.length === 1 ? objects[0] : new fabric.Group(objects);
+        // SVG element ids are author-controlled and commonly repeat when the
+        // same asset is imported more than once. Always allocate document ids.
+        reassignObjectIdsRecursive(object);
+        canvas.add(object);
+        canvas.setActiveObject(object);
+      } else {
+        const image = await fabric.Image.fromURL(await readFileAsDataUrl(file));
+        if (!canCommit()) {
+          image.dispose();
+          return;
+        }
+        reassignObjectIdsRecursive(image);
+        const maxWidth = canvas.width || 800;
+        const maxHeight = canvas.height || 600;
+        const imageWidth = image.width || 100;
+        const imageHeight = image.height || 100;
+        const imageScale = Math.min(
+          1,
+          maxWidth * 0.8 / imageWidth,
+          maxHeight * 0.8 / imageHeight,
+        );
+        if (imageScale < 1) {
+          image.set({ scaleX: imageScale, scaleY: imageScale });
+        }
+        canvas.add(image);
+        canvas.setActiveObject(image);
+      }
+      canvas.requestRenderAll();
+      pushHistory();
+    } catch {
+      showToast(t('importError'), 'error');
+    }
   };
 
   const handleDeleteSelected = () => {
@@ -271,6 +251,8 @@ export default function Toolbar() {
       }
       obj.setCoords();
     });
+    activeObj.setCoords();
+    updateLinkedSemanticObjects(canvas);
     canvas.requestRenderAll();
     pushHistory();
   };
@@ -299,6 +281,8 @@ export default function Toolbar() {
       let y = first;
       bounds.forEach((b) => { b.obj.set({ top: (b.obj.top || 0) + (y - b.rect.top) }); b.obj.setCoords(); y += b.rect.height + gap; });
     }
+    activeObj.setCoords();
+    updateLinkedSemanticObjects(canvas);
     canvas.requestRenderAll();
     pushHistory();
   };
@@ -318,8 +302,8 @@ export default function Toolbar() {
 
       <div className="toolbar-group">
         <span className="toolbar-group-label">{t('edit')}</span>
-        <button className="toolbar-btn" onClick={undo} disabled={historyIndex <= 0} title={t('tip_undo')}>{t('undo')}</button>
-        <button className="toolbar-btn" onClick={redo} disabled={historyIndex >= historyLength - 1} title={t('tip_redo')}>{t('redo')}</button>
+        <button className="toolbar-btn" onClick={undo} disabled={isRestoring || historyIndex <= 0} title={t('tip_undo')}>{t('undo')}</button>
+        <button className="toolbar-btn" onClick={redo} disabled={isRestoring || historyIndex >= historyLength - 1} title={t('tip_redo')}>{t('redo')}</button>
         <button className="toolbar-btn" onClick={handleDuplicate} title={t('tip_duplicate')}>{t('duplicate')}</button>
         <button className="toolbar-btn" onClick={handleDeleteSelected} title={t('tip_delete')}>{t('delete')}</button>
         <button className="toolbar-btn" onClick={handleSelectAll} title={t('tip_selectAll')}>{t('selectAll')}</button>
@@ -361,21 +345,19 @@ export default function Toolbar() {
 
       <div className="toolbar-group">
         <span className="toolbar-group-label">{t('export')}</span>
-        {drawingMode === 'cad' ? (
-          <button className="toolbar-btn" onClick={() => setShowCadExport(true)} title={t('cadExport')}>{t('cadExport')}</button>
-        ) : (
-          <>
-            <button className="toolbar-btn" onClick={handleExportSVG} title={t('tip_svg')}>{t('svg')}</button>
-            <button className="toolbar-btn" onClick={handleExportPNG} title={t('tip_png')}>{t('png')}</button>
-            <button className="toolbar-btn" onClick={handleExportPDF} title={t('tip_pdf')}>{t('pdf')}</button>
-          </>
-        )}
+        <button
+          className="toolbar-btn"
+          onClick={() => setShowExport(true)}
+          title={t('exportDialogTitle')}
+        >
+          {t('cadExportBtn')}
+        </button>
       </div>
       {showNumericMove && (
         <NumericMoveDialog onClose={() => setShowNumericMove(false)} />
       )}
-      {showCadExport && (
-        <CadExportDialog onClose={() => setShowCadExport(false)} />
+      {showExport && (
+        <ExportDialog onClose={() => setShowExport(false)} />
       )}
     </div>
   );

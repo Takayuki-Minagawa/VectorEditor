@@ -2,53 +2,25 @@ import { useState, useEffect } from 'react';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import type { ToolType } from '../types';
-import type { TranslationKeys } from '../i18n/ja';
+import { ALL_TOOLS, TOOL_CATEGORIES } from '../domain/tools';
+import type { ToolCategory, ToolDefinition } from '../domain/tools';
+import Dialog from './Dialog';
+import IconButton from './IconButton';
+import SymbolLibrary from './SymbolLibrary';
 
-type ToolCategory = 'basic' | 'shapes' | 'arch' | 'utility';
-
-interface ToolDef {
-  tool: ToolType;
-  labelKey: TranslationKeys;
-  icon: string;
-  category: ToolCategory;
-}
-
-const allTools: ToolDef[] = [
-  { tool: 'select', labelKey: 'tool_select', icon: '⊹', category: 'basic' },
-  { tool: 'line', labelKey: 'tool_line', icon: '╲', category: 'basic' },
-  { tool: 'arrow', labelKey: 'tool_arrow', icon: '→', category: 'basic' },
-  { tool: 'pencil', labelKey: 'tool_pencil', icon: '✎', category: 'basic' },
-  { tool: 'text', labelKey: 'tool_text', icon: 'T', category: 'basic' },
-  { tool: 'rect', labelKey: 'tool_rect', icon: '□', category: 'shapes' },
-  { tool: 'roundedRect', labelKey: 'tool_roundedRect', icon: '▢', category: 'shapes' },
-  { tool: 'circle', labelKey: 'tool_circle', icon: '○', category: 'shapes' },
-  { tool: 'ellipse', labelKey: 'tool_ellipse', icon: '⬮', category: 'shapes' },
-  { tool: 'triangle', labelKey: 'tool_triangle', icon: '△', category: 'shapes' },
-  { tool: 'diamond', labelKey: 'tool_diamond', icon: '◇', category: 'shapes' },
-  { tool: 'polygon', labelKey: 'tool_polygon', icon: '⬡', category: 'shapes' },
-  { tool: 'polyline', labelKey: 'tool_polyline', icon: '⟋', category: 'shapes' },
-  { tool: 'dimension', labelKey: 'tool_dimension', icon: '↔', category: 'arch' },
-  { tool: 'wall', labelKey: 'tool_wall', icon: '▬', category: 'arch' },
-  { tool: 'column', labelKey: 'tool_column', icon: '▪', category: 'arch' },
-  { tool: 'latex', labelKey: 'tool_latex', icon: '∑', category: 'utility' },
-  { tool: 'measure', labelKey: 'tool_measure', icon: '📐', category: 'utility' },
-  { tool: 'stretch', labelKey: 'tool_stretch', icon: '⇔', category: 'utility' },
-];
-
-const categories: { key: ToolCategory; labelKey: TranslationKeys }[] = [
-  { key: 'basic', labelKey: 'cat_basic' },
-  { key: 'shapes', labelKey: 'cat_shapes' },
-  { key: 'arch', labelKey: 'cat_arch' },
-  { key: 'utility', labelKey: 'cat_utility' },
-];
-
-const STORAGE_KEY = 'vectoreditor-visible-tools-v2';
-const ALL_TOOL_IDS = allTools.map((t) => t.tool);
+const STORAGE_KEY = 'vectoreditor-visible-tools-v3';
+const ALL_TOOL_IDS = ALL_TOOLS.map((t) => t.tool);
 
 function loadVisibleTools(): Set<ToolType> {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return new Set(JSON.parse(saved) as ToolType[]);
+    if (saved) {
+      const parsed = JSON.parse(saved) as unknown;
+      if (Array.isArray(parsed)) {
+        const known = parsed.filter((tool): tool is ToolType => ALL_TOOL_IDS.includes(tool as ToolType));
+        return new Set<ToolType>(['select', ...known]);
+      }
+    }
   } catch { /* ignore */ }
   return new Set(ALL_TOOL_IDS);
 }
@@ -75,7 +47,7 @@ export default function ToolPanel() {
   };
 
   const toggleCategory = (cat: ToolCategory) => {
-    const catTools = allTools.filter((td) => td.category === cat && td.tool !== 'select');
+    const catTools = ALL_TOOLS.filter((td) => td.category === cat && td.tool !== 'select');
     const allVisible = catTools.every((td) => visibleTools.has(td.tool));
     setVisibleTools((prev) => {
       const next = new Set(prev);
@@ -87,10 +59,10 @@ export default function ToolPanel() {
     });
   };
 
-  const visibleList = allTools.filter((td) => visibleTools.has(td.tool));
+  const visibleList = ALL_TOOLS.filter((td) => visibleTools.has(td.tool));
 
   // Group visible tools by category for display with separators
-  const grouped: { category: ToolCategory; tools: ToolDef[] }[] = [];
+  const grouped: { category: ToolCategory; tools: ToolDefinition[] }[] = [];
   let lastCat: ToolCategory | null = null;
   for (const td of visibleList) {
     if (td.category !== lastCat) {
@@ -104,13 +76,13 @@ export default function ToolPanel() {
     <div className="tool-panel">
       <div className="panel-title-row">
         <span className="panel-title">{t('tools')}</span>
-        <button
+        <IconButton
           className="tool-settings-btn"
           onClick={() => setShowSettings(true)}
-          title={t('toolSettings')}
+          label={t('toolSettings')}
         >
           ⚙
-        </button>
+        </IconButton>
       </div>
 
       {grouped.map((group, gi) => (
@@ -122,6 +94,8 @@ export default function ToolPanel() {
               className={`tool-btn ${activeTool === td.tool ? 'active' : ''}`}
               onClick={() => setActiveTool(td.tool)}
               title={t(td.labelKey)}
+              aria-label={t(td.labelKey)}
+              aria-pressed={activeTool === td.tool}
             >
               <span className="tool-icon">{td.icon}</span>
               <span className="tool-label">{t(td.labelKey)}</span>
@@ -130,17 +104,15 @@ export default function ToolPanel() {
         </div>
       ))}
 
+      <div className="tool-separator" />
+      <SymbolLibrary />
+
       {showSettings && (
-        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <span>{t('toolSettings')}</span>
-              <button className="modal-close" onClick={() => setShowSettings(false)}>&times;</button>
-            </div>
-            <div className="modal-body">
+        <Dialog title={t('toolSettings')} onClose={() => setShowSettings(false)} closeLabel={t('cancel')}>
+          <div className="modal-body">
               <p style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{t('toolSettingsDesc')}</p>
-              {categories.map((cat) => {
-                const catTools = allTools.filter((td) => td.category === cat.key);
+              {TOOL_CATEGORIES.map((cat) => {
+                const catTools = ALL_TOOLS.filter((td) => td.category === cat.key);
                 const allChecked = catTools.every((td) => td.tool === 'select' || visibleTools.has(td.tool));
                 return (
                   <div key={cat.key} className="tool-settings-category">
@@ -169,9 +141,8 @@ export default function ToolPanel() {
                   </div>
                 );
               })}
-            </div>
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   );
