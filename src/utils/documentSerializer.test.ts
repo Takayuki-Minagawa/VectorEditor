@@ -1,10 +1,12 @@
 import * as fabric from 'fabric';
 import { describe, expect, it, vi } from 'vitest';
+import type { SectionProfileData } from '../domain/section';
 import {
   DOCUMENT_VERSION,
   DocumentRestoreSupersededError,
   parseAutoSaveData,
   parseDocumentData,
+  restoreCanvasObjects,
   restoreDocumentData,
 } from './documentSerializer';
 import type { CanvasSnapshot } from './documentSerializer';
@@ -12,9 +14,26 @@ import { historyService } from './historyService';
 import {
   applyPersistentObjectState,
   FABRIC_CUSTOM_PROPERTIES,
+  getFabricMetadata,
   prepareObjectMetadataForSerialization,
+  setFabricMetadataValues,
   type FabricObjectWithMetadata,
 } from './fabricObjectMetadata';
+
+const sectionProfile: SectionProfileData = {
+  version: 1,
+  analysisToleranceMm: 0.01,
+  approximate: false,
+  rings: [{
+    role: 'outer',
+    points: [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 50 },
+      { x: 0, y: 50 },
+    ],
+  }],
+};
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -41,6 +60,20 @@ function legacyDocument(overrides: Record<string, unknown> = {}): string {
     cadWidth: 10_000,
     cadHeight: 8_000,
     ...overrides,
+  });
+}
+
+function currentDocument(objects: unknown[]): string {
+  return JSON.stringify({
+    documentId: 'doc_current',
+    version: DOCUMENT_VERSION,
+    canvas: { width: 800, height: 600, backgroundColor: '#ffffff' },
+    objects: { version: '7.2.0', objects },
+    drawingMode: 'cad',
+    cadUnit: 'mm',
+    scale: '1:1',
+    cadWidth: 800,
+    cadHeight: 600,
   });
 }
 
@@ -77,6 +110,19 @@ describe('document schema', () => {
     expect(parsed.objects.objects).toEqual([]);
   });
 
+  it('round-trips section metadata through the current autosave schema', () => {
+    const parsed = parseAutoSaveData(currentDocument([{
+      type: 'Path',
+      objectKind: 'sectionProfile',
+      sectionProfileData: sectionProfile,
+    }]));
+
+    expect(parsed.objects.objects[0]).toMatchObject({
+      objectKind: 'sectionProfile',
+      sectionProfileData: sectionProfile,
+    });
+  });
+
   it.each([
     ['a future version', { version: 99 }],
     ['an invalid drawing mode', { drawingMode: 'sketch' }],
@@ -91,6 +137,139 @@ describe('document schema', () => {
     expect(() => parseDocumentData(legacyDocument({
       objects: JSON.stringify({ objects: [{ width: 20 }] }),
     }))).toThrow(/type/);
+  });
+
+  it('round-trips section profile metadata through the current document schema', () => {
+    const parsed = parseDocumentData(currentDocument([{
+      type: 'Rect',
+      objectKind: 'sectionProfile',
+      sectionProfileData: sectionProfile,
+    }]));
+
+    expect(parsed.objects.objects).toEqual([expect.objectContaining({
+      objectKind: 'sectionProfile',
+      sectionProfileData: sectionProfile,
+    })]);
+  });
+
+  it('requires section object kind and profile metadata to appear together', () => {
+    expect(() => parseDocumentData(currentDocument([{
+      type: 'Path',
+      objectKind: 'sectionProfile',
+    }]))).toThrow(/sectionProfileData is required/);
+
+    expect(() => parseDocumentData(currentDocument([{
+      type: 'Path',
+      sectionProfileData: sectionProfile,
+    }]))).toThrow(/objectKind must be sectionProfile/);
+  });
+
+  it('applies the generic depth budget before recursively inspecting group metadata', () => {
+    let object: Record<string, unknown> = { type: 'Rect' };
+    for (let depth = 0; depth < 110; depth += 1) {
+      object = { type: 'Group', objects: [object] };
+    }
+
+    expect(() => parseDocumentData(currentDocument([object]))).toThrow(/nested too deeply/);
+  });
+
+  it('rejects structurally invalid section profile metadata', () => {
+    expect(() => parseDocumentData(currentDocument([{
+      type: 'Rect',
+      sectionProfileData: { ...sectionProfile, approximate: 'yes' },
+    }]))).toThrow(/sectionProfileData is invalid.*boolean/);
+  });
+
+  it('rejects section metadata with a hole outside its material boundary', () => {
+    expect(() => parseDocumentData(currentDocument([{
+      type: 'Path',
+      objectKind: 'sectionProfile',
+      sectionProfileData: {
+        ...sectionProfile,
+        rings: [
+          ...sectionProfile.rings,
+          {
+            role: 'hole',
+            points: [
+              { x: 200, y: 200 },
+              { x: 200, y: 210 },
+              { x: 210, y: 210 },
+              { x: 210, y: 200 },
+            ],
+          },
+        ],
+      },
+    }]))).toThrow(/hole must be contained/);
+  });
+
+  it('rejects non-finite section coordinates before Fabric enlivening', () => {
+    const raw = currentDocument([{
+      type: 'Rect',
+      sectionProfileData: {
+        ...sectionProfile,
+        rings: [{
+          role: 'outer',
+          points: [
+            { x: '__NON_FINITE__', y: 0 },
+            { x: 100, y: 0 },
+            { x: 100, y: 50 },
+          ],
+        }],
+      },
+    }]).replace('"__NON_FINITE__"', '1e309');
+
+    expect(() => parseDocumentData(raw)).toThrow(/sectionProfileData.*non-finite/);
+  });
+
+  it('rejects section profiles that exceed the ring or point budgets', () => {
+    const ring = sectionProfile.rings[0];
+    const excessiveRings = Array.from({ length: 10_001 }, () => ring);
+    expect(() => parseDocumentData(currentDocument([{
+      type: 'Rect',
+      sectionProfileData: { ...sectionProfile, rings: excessiveRings },
+    }]))).toThrow(/too many rings/);
+
+    const excessivePoints = Array.from({ length: 100_001 }, () => ({ x: 0, y: 0 }));
+    expect(() => parseDocumentData(currentDocument([{
+      type: 'Rect',
+      sectionProfileData: {
+        ...sectionProfile,
+        rings: [{ role: 'outer', points: excessivePoints }],
+      },
+    }]))).toThrow(/too many points/);
+  });
+
+  it('rejects section coordinates outside the supported CAD range', () => {
+    expect(() => parseDocumentData(currentDocument([{
+      type: 'Rect',
+      sectionProfileData: {
+        ...sectionProfile,
+        rings: [{
+          role: 'outer',
+          points: [
+            { x: 0, y: 0 },
+            { x: 1_000_000_001, y: 0 },
+            { x: 100, y: 50 },
+          ],
+        }],
+      },
+    }]))).toThrow(/coordinate is outside the supported range/);
+  });
+
+  it('accepts optional undefined Fabric properties in an in-memory history payload', async () => {
+    const loadFromJSON = vi.fn().mockResolvedValue(undefined);
+    const canvas = {
+      renderOnAddRemove: true,
+      loadFromJSON,
+      getObjects: () => [],
+      requestRenderAll: vi.fn(),
+    } as unknown as fabric.Canvas;
+
+    await restoreCanvasObjects(canvas, {
+      objects: [{ type: 'Rect', strokeDashArray: undefined }],
+    });
+
+    expect(loadFromJSON).toHaveBeenCalledOnce();
   });
 
   it('rolls the live document back when Fabric rejects a validated payload', async () => {
@@ -285,5 +464,41 @@ describe('Fabric document metadata', () => {
     expect(rect.lockMovementX).toBe(true);
     expect(rect.lockScalingY).toBe(true);
     expect(rect.hasControls).toBe(false);
+  });
+
+  it('preserves detached section profile metadata through Fabric enlivening', async () => {
+    const rect = new fabric.Rect({ width: 100, height: 50 });
+    setFabricMetadataValues(rect, {
+      objectKind: 'sectionProfile',
+      sectionProfileData: sectionProfile,
+    });
+    const toObject = rect.toObject.bind(rect) as unknown as (
+      properties: string[],
+    ) => Record<string, unknown>;
+    const serialized = toObject([...FABRIC_CUSTOM_PROPERTIES]);
+    const transported = JSON.parse(JSON.stringify(serialized)) as unknown;
+
+    const [restored] = await fabric.util.enlivenObjects<fabric.FabricObject>([transported]);
+
+    expect(getFabricMetadata(restored)).toMatchObject({
+      objectKind: 'sectionProfile',
+      sectionProfileData: sectionProfile,
+    });
+    expect(getFabricMetadata(restored).sectionProfileData).not.toBe(sectionProfile);
+  });
+
+  it('preserves section profile metadata when Fabric objects are cloned', async () => {
+    const rect = new fabric.Rect({ width: 100, height: 50 });
+    setFabricMetadataValues(rect, {
+      objectKind: 'sectionProfile',
+      sectionProfileData: sectionProfile,
+    });
+
+    const cloned = await rect.clone();
+
+    expect(getFabricMetadata(cloned)).toMatchObject({
+      objectKind: 'sectionProfile',
+      sectionProfileData: sectionProfile,
+    });
   });
 });

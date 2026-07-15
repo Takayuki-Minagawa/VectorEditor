@@ -27,4 +27,30 @@ describe('symbol repository', () => {
     await deleteSymbol(record.id);
     expect(await listSymbols()).toEqual([]);
   });
+
+  it('round-trips section profile metadata in a symbol record', async () => {
+    const record = {
+      id: 'symbol-section',
+      name: 'Hollow section',
+      objects: [{
+        type: 'Path',
+        objectKind: 'sectionProfile',
+        sectionProfileData: {
+          version: 1,
+          analysisToleranceMm: 0.01,
+          approximate: false,
+          rings: [{
+            role: 'outer',
+            points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 5 }, { x: 0, y: 5 }],
+          }],
+        },
+      }],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    await saveSymbol(record);
+
+    expect(await listSymbols()).toEqual([record]);
+  });
 });

@@ -14,6 +14,13 @@ import {
   toggleActiveLock,
   ungroupActive,
 } from '../utils/canvasCommands';
+import {
+  createSectionFromSelection,
+  subtractSelectionFromSection,
+  unionSelectionAsSection,
+} from '../utils/sectionCommands';
+import { isSupportedSectionSourceObject } from '../utils/sectionGeometry';
+import { openSectionOperations } from '../utils/sectionUiEvents';
 
 interface MenuPos { x: number; y: number; }
 
@@ -24,6 +31,8 @@ export default function ContextMenu() {
   const setClipboard = useEditorStore((s) => s.setClipboard);
   const clipboard = useEditorStore((s) => s.clipboard);
   const t = useI18n((s) => s.t);
+  const drawingMode = useEditorStore((s) => s.drawingMode);
+  const showToast = useEditorStore((s) => s.showToast);
 
   const close = useCallback(() => setPos(null), []);
 
@@ -61,6 +70,7 @@ export default function ContextMenu() {
   const hasSelection = !!active;
   const isGroup = active instanceof fabric.Group;
   const isMultiple = active instanceof fabric.ActiveSelection;
+  const canFillet = !!active && !isMultiple && isSupportedSectionSourceObject(active);
 
   const exec = (fn: () => void) => { fn(); close(); };
 
@@ -77,6 +87,24 @@ export default function ContextMenu() {
   const handleBringForward = () => exec(() => stackActive(canvas, 'bringForward', pushHistory));
   const handleSendBackward = () => exec(() => stackActive(canvas, 'sendBackward', pushHistory));
   const handleLock = () => exec(() => toggleActiveLock(canvas));
+  const runSectionOperation = (operation: () => void) => exec(() => {
+    try {
+      operation();
+      showToast(t('sectionOperationDone'), 'success');
+    } catch (caught: unknown) {
+      showToast(caught instanceof Error ? caught.message : t('sectionOperationFailed'), 'error');
+    }
+  });
+  const handleSectionCreate = () => runSectionOperation(
+    () => createSectionFromSelection(canvas, pushHistory),
+  );
+  const handleSectionSubtract = () => runSectionOperation(
+    () => subtractSelectionFromSection(canvas, pushHistory),
+  );
+  const handleSectionUnion = () => runSectionOperation(
+    () => unionSelectionAsSection(canvas, pushHistory),
+  );
+  const handleSectionFillet = () => exec(openSectionOperations);
 
   return (
     <div className="context-menu" style={{ left: pos.x, top: pos.y }} onClick={(e) => e.stopPropagation()}>
@@ -96,6 +124,15 @@ export default function ContextMenu() {
           {isMultiple && <button className="context-item" onClick={handleGroup}>{t('ctx_group')}</button>}
           {isGroup && <button className="context-item" onClick={handleUngroup}>{t('ctx_ungroup')}</button>}
           <button className="context-item" onClick={handleLock}>{active.lockMovementX ? t('ctx_unlock') : t('ctx_lock')}</button>
+          {drawingMode === 'cad' && (
+            <>
+              <div className="context-divider" />
+              <button className="context-item" onClick={handleSectionCreate}>{t('ctx_sectionCreate')}</button>
+              {isMultiple && <button className="context-item" onClick={handleSectionUnion}>{t('ctx_sectionUnion')}</button>}
+              {isMultiple && <button className="context-item" onClick={handleSectionSubtract}>{t('ctx_sectionSubtract')}</button>}
+              {canFillet && <button className="context-item" onClick={handleSectionFillet}>{t('ctx_sectionFillet')}</button>}
+            </>
+          )}
           <div className="context-divider" />
           <button className="context-item danger" onClick={handleDelete}>{t('ctx_delete')}</button>
         </>

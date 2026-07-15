@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as fabric from 'fabric';
+import { setFabricMetadataValues } from '../utils/fabricObjectMetadata';
 import { exportObjectsToDxf } from './dxfExporter';
 
 function firstEntityValue(text: string, entity: string, groupCode: number): number {
@@ -12,6 +13,22 @@ function firstEntityValue(text: string, entity: string, groupCode: number): numb
     }
   }
   throw new Error(`${entity} group code ${groupCode} was not found`);
+}
+
+function entityValues(text: string, entity: string, groupCode: number): number[] {
+  const values = text.trimEnd().split('\r\n');
+  const result: number[] = [];
+  for (let index = 0; index < values.length - 1; index += 2) {
+    if (values[index] !== '0' || values[index + 1] !== entity) continue;
+    for (let pairIndex = index + 2; pairIndex < values.length - 1; pairIndex += 2) {
+      if (values[pairIndex] === '0') break;
+      if (values[pairIndex] === String(groupCode)) {
+        result.push(Number(values[pairIndex + 1]));
+        break;
+      }
+    }
+  }
+  return result;
 }
 
 describe('R12 ASCII DXF export', () => {
@@ -106,5 +123,88 @@ describe('R12 ASCII DXF export', () => {
     const result = exportObjectsToDxf([text], 200, 100);
 
     expect(result.approximatedTypes).toContain('TextTransform');
+  });
+
+  it('exports section outer and hole rings as transformed closed polylines with warnings', () => {
+    const section = new fabric.Rect({
+      left: 50,
+      top: 40,
+      width: 40,
+      height: 20,
+      originX: 'center',
+      originY: 'center',
+    });
+    setFabricMetadataValues(section, {
+      objectKind: 'sectionProfile',
+      sectionProfileData: {
+        version: 1,
+        analysisToleranceMm: 0.01,
+        approximate: true,
+        rings: [
+          {
+            role: 'outer',
+            points: [
+              { x: -20, y: -10 },
+              { x: 20, y: -10 },
+              { x: 20, y: 10 },
+              { x: -20, y: 10 },
+            ],
+          },
+          {
+            role: 'hole',
+            points: [
+              { x: -5, y: -5 },
+              { x: -5, y: 5 },
+              { x: 5, y: 5 },
+              { x: 5, y: -5 },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = exportObjectsToDxf([section], 300, 200);
+
+    expect(entityValues(result.text, 'POLYLINE', 70)).toEqual([1, 1]);
+    expect(entityValues(result.text, 'VERTEX', 10)).toHaveLength(8);
+    expect(firstEntityValue(result.text, 'VERTEX', 10)).toBeCloseTo(30, 6);
+    expect(firstEntityValue(result.text, 'VERTEX', 20)).toBeCloseTo(150, 6);
+    expect(result.unsupportedTypes).toEqual([]);
+    expect(result.approximatedTypes).toEqual([
+      'SectionProfileApproximation',
+      'SectionProfileHoles',
+    ]);
+  });
+
+  it('skips an invalid transformed section while continuing to export other objects', () => {
+    const section = new fabric.Rect({
+      width: 40,
+      height: 20,
+      scaleX: 1e-20,
+    });
+    setFabricMetadataValues(section, {
+      objectKind: 'sectionProfile',
+      sectionProfileData: {
+        version: 1,
+        analysisToleranceMm: 0.01,
+        approximate: false,
+        rings: [{
+          role: 'outer',
+          points: [
+            { x: -20, y: -10 },
+            { x: 20, y: -10 },
+            { x: 20, y: 10 },
+            { x: -20, y: 10 },
+          ],
+        }],
+      },
+    });
+    const line = new fabric.Line([10, 20, 40, 50]);
+
+    const result = exportObjectsToDxf([section, line], 300, 200);
+
+    expect(result.text).toMatch(/0\r\nLINE\r\n/);
+    expect(result.text).not.toMatch(/0\r\nPOLYLINE\r\n/);
+    expect(result.unsupportedTypes).toEqual(['SectionProfile']);
   });
 });
