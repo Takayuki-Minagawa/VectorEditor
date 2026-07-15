@@ -12,7 +12,22 @@ const documentData: DocumentData = {
   documentId: 'doc-1',
   version: 2,
   canvas: { width: 800, height: 600, backgroundColor: '#fff' },
-  objects: { version: '6.0.0', objects: [] },
+  objects: {
+    version: '7.4.0',
+    objects: [{
+      type: 'Path',
+      objectKind: 'sectionProfile',
+      sectionProfileData: {
+        version: 1,
+        analysisToleranceMm: 0.01,
+        approximate: false,
+        rings: [{
+          role: 'outer',
+          points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 5 }, { x: 0, y: 5 }],
+        }],
+      },
+    }],
+  },
 };
 
 function deleteDatabase(): Promise<void> {
@@ -36,7 +51,12 @@ describe('project repository', () => {
       );
     }
 
-    expect(await listProjects()).toHaveLength(1);
+    const projects = await listProjects();
+    expect(projects).toHaveLength(1);
+    expect(projects[0].latest.objects.objects[0]).toMatchObject({
+      objectKind: 'sectionProfile',
+      sectionProfileData: expect.objectContaining({ version: 1 }),
+    });
     const versions = await listProjectSnapshots('doc-1');
     expect(versions).toHaveLength(20);
     expect(versions[0].id).toBe('snapshot-21');

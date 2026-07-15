@@ -11,6 +11,12 @@ import {
   pasteClipboard,
   selectAll,
 } from '../utils/canvasCommands';
+import {
+  createSectionFromSelection,
+  subtractSelectionFromSection,
+  unionSelectionAsSection,
+} from '../utils/sectionCommands';
+import { openSectionOperations } from '../utils/sectionUiEvents';
 import Dialog from './Dialog';
 
 interface EditorAction {
@@ -49,6 +55,8 @@ export default function CommandPalette() {
   const toggleRulers = useEditorStore((state) => state.toggleRulers);
   const toggleOrtho = useEditorStore((state) => state.toggleOrtho);
   const toggleTheme = useEditorStore((state) => state.toggleTheme);
+  const drawingMode = useEditorStore((state) => state.drawingMode);
+  const showToast = useEditorStore((state) => state.showToast);
   const t = useI18n((state) => state.t);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -76,6 +84,14 @@ export default function CommandPalette() {
   };
 
   const actions = useMemo<EditorAction[]>(() => {
+    const runSectionCommand = (operation: () => void) => {
+      try {
+        operation();
+        showToast(t('sectionOperationDone'), 'success');
+      } catch (caught: unknown) {
+        showToast(caught instanceof Error ? caught.message : t('sectionOperationFailed'), 'error');
+      }
+    };
     const canvasActions: EditorAction[] = [
       { id: 'undo', label: t('undo'), keywords: 'undo history', shortcut: '⌘/Ctrl+Z', disabled: isRestoring || historyIndex <= 0, perform: undo },
       { id: 'redo', label: t('redo'), keywords: 'redo history', shortcut: '⌘/Ctrl+Shift+Z', disabled: isRestoring || historyIndex >= historyLength - 1, perform: redo },
@@ -92,6 +108,49 @@ export default function CommandPalette() {
       { id: 'toggle-rulers', label: t('rulers'), keywords: 'ruler guide', perform: toggleRulers },
       { id: 'toggle-ortho', label: t('ortho'), keywords: 'orthogonal angle', perform: toggleOrtho },
       { id: 'toggle-theme', label: t('tip_theme'), keywords: 'theme dark light', perform: toggleTheme },
+      {
+        id: 'section-create',
+        label: t('sectionCreate'),
+        keywords: 'section profile union area inertia centroid 断面 合成',
+        disabled: !canvas || drawingMode !== 'cad' || selectionCount === 0,
+        perform: () => {
+          if (!canvas) return;
+          runSectionCommand(() => {
+            createSectionFromSelection(canvas, pushHistory);
+          });
+        },
+      },
+      {
+        id: 'section-union',
+        label: t('sectionUnion'),
+        keywords: 'section profile union material 断面 合成',
+        disabled: !canvas || drawingMode !== 'cad' || selectionCount < 2,
+        perform: () => {
+          if (!canvas) return;
+          runSectionCommand(() => {
+            unionSelectionAsSection(canvas, pushHistory);
+          });
+        },
+      },
+      {
+        id: 'section-subtract',
+        label: t('sectionSubtract'),
+        keywords: 'section profile difference hole cutout 断面 切り抜き',
+        disabled: !canvas || drawingMode !== 'cad' || selectionCount < 2,
+        perform: () => {
+          if (!canvas) return;
+          runSectionCommand(() => {
+            subtractSelectionFromSection(canvas, pushHistory);
+          });
+        },
+      },
+      {
+        id: 'section-fillet',
+        label: t('sectionFillet'),
+        keywords: 'section profile fillet radius corner R 角丸',
+        disabled: !canvas || drawingMode !== 'cad' || selectionCount !== 1,
+        perform: openSectionOperations,
+      },
     ];
     return [
       ...canvasActions,
@@ -102,7 +161,7 @@ export default function CommandPalette() {
         perform: () => setActiveTool(tool.tool),
       })),
     ];
-  }, [canvas, clipboard, historyIndex, historyLength, isRestoring, pushHistory, redo, selectionCount, setActiveTool, setClipboard, t, toggleGrid, toggleLeftPanel, toggleOrtho, toggleRightPanel, toggleRulers, toggleSnap, toggleSnapToObjects, toggleTheme, undo]);
+  }, [canvas, clipboard, drawingMode, historyIndex, historyLength, isRestoring, pushHistory, redo, selectionCount, setActiveTool, setClipboard, showToast, t, toggleGrid, toggleLeftPanel, toggleOrtho, toggleRightPanel, toggleRulers, toggleSnap, toggleSnapToObjects, toggleTheme, undo]);
 
   const filtered = useMemo(() => {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);

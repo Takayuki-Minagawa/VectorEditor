@@ -94,6 +94,7 @@ const FABRIC_EXPORT_PROPS = [
   'id',
   'name',
   'objectKind',
+  'sectionProfileData',
   'latexSource',
 ];
 const MAX_RASTER_SIDE = 32_767;

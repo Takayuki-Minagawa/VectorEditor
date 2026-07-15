@@ -1,4 +1,6 @@
 import * as fabric from 'fabric';
+import { readSectionProfileInDocumentCoordinates } from '../utils/sectionGeometry';
+import { getFabricMetadata } from '../utils/fabricObjectMetadata';
 
 export interface DxfExportResult {
   text: string;
@@ -184,6 +186,31 @@ export function exportObjectsToDxf(
 
   const visit = (object: fabric.FabricObject): void => {
     if (!object.visible || object.excludeFromExport) return;
+
+    const metadata = getFabricMetadata(object);
+    if (metadata.objectKind === 'sectionProfile' && metadata.sectionProfileData) {
+      const profile = readSectionProfileInDocumentCoordinates(object);
+      profile.rings.forEach((ring) => {
+        addPolyline(
+          entities,
+          ring.points.map((point) => ({
+            x: point.x,
+            // Section metadata uses engineering coordinates (+y up), with
+            // document y=0 at the Canvas top. Shift that coordinate into the
+            // same bottom-left DXF space used by the ordinary Fabric paths.
+            y: drawingHeight + point.y,
+          })),
+          true,
+        );
+      });
+      if (profile.approximate) approximated.add('SectionProfileApproximation');
+      if (profile.rings.some((ring) => ring.role === 'hole')) {
+        // R12 POLYLINE carries no material/hole topology. The boundary is
+        // exported, but downstream CAD software may interpret it as material.
+        approximated.add('SectionProfileHoles');
+      }
+      return;
+    }
 
     if (object instanceof fabric.Group) {
       object.getObjects().forEach(visit);

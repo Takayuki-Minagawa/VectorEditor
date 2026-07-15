@@ -30,6 +30,7 @@ function objectFallbackLabel(object: fabric.FabricObject, t: ReturnType<typeof u
   }
   const toolDefinition = ALL_TOOLS.find((tool) => tool.objectKind === objectKind);
   if (toolDefinition) return t(toolDefinition.labelKey);
+  if (objectKind === 'sectionProfile') return t('layerSectionProfile');
   if (object instanceof fabric.Group) return `${t('layerGroup')} (${object.getObjects().length})`;
   if (object instanceof fabric.Line) return t('layerLine');
   if (object instanceof fabric.Rect) return t('layerRect');

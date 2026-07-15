@@ -10,6 +10,7 @@ Vector Illustration Editor v1.1.0 is a browser-based editor for diagrams, illust
 - Unified export settings for canvas, content, or selection, including margin, background, transparency, multiplier, file name, and compatible OS clipboard output
 - Correct CAD paper-size PDF output and AutoCAD R12 ASCII DXF export
 - CAD OSNAP, associative dimensions, and straight or elbow connectors that follow referenced objects
+- CAD section profiles with material union, cut-outs, convex fillets, and geometric section properties
 - Full-document transactional Undo / Redo, versioned schema validation, and v1-to-v2 migration
 - IndexedDB-first auto-save, named projects with up to 20 snapshots, and reusable symbol assets
 - Searchable, renameable, drag-sortable layer tree with multi-selection visibility and lock operations
@@ -39,6 +40,22 @@ Vector Illustration Editor v1.1.0 is a browser-based editor for diagrams, illust
 - Associative dimensions store stable object/anchor references and refresh their value after referenced geometry changes
 - Connectors store stable endpoint references and follow moved objects; hold `Alt` while drawing to create an elbow route
 - Rulers and guide coordinates share the active canvas viewport, including pan, zoom, and resize changes
+
+### Section profiles and geometric properties
+
+In CAD mode, supported closed shapes can be converted into a section profile at `1 unit = 1 mm`.
+
+- Inputs: rectangles, rounded rectangles, circles, ellipses, closed polygons, supported groups, and existing section profiles
+- Operations: create a section, union overlapping material, subtract holes/notches, and apply a numeric radius to selected convex line-line corners
+- Results: area, centroid, `Ix`, `Iy`, `Ixy`, principal moments/axis, centroid-to-extreme-fibre distances, and side-specific elastic section moduli
+- Display: switch between mm- and cm-based result units; show centroid, centroidal axes, principal axis, and extreme-fibre bounds as non-persistent overlays
+- Integrity: one operation produces one Undo/Redo entry; JSON, auto-save, clone/copy, project, and symbol persistence retain the normalized section metadata
+- Export: SVG/PNG/PDF preserve the compound even-odd path; DXF writes every outer/hole boundary as a closed R12 `POLYLINE` and reports approximation/hole limitations
+- Accuracy: curve/fillet boundaries are adaptively polygonized using the displayed millimetre tolerance; invalid, self-intersecting, non-finite, empty, or inconsistent ring topology is rejected
+
+The convex-fillet editor accepts exact straight-edged profiles only. Concave corners, circles or other curved boundaries, curve-derived Boolean results, and a second fillet pass over an already filleted profile remain outside this release; choose every required eligible corner in one preview/commit.
+
+These are geometric section properties only. Material strength, member resistance, buckling, effective width, and connection integrity must be checked separately by the engineer.
 
 ### Layers, styles, and reusable content
 
@@ -124,6 +141,7 @@ CI runs lint, type checking, unit tests, production dependency auditing, build, 
 | React / React DOM | 19.2 | UI |
 | TypeScript | 5.9 | Static types and build checks |
 | Fabric.js | 7.4 | Canvas rendering and object manipulation |
+| polygon-clipping | 0.15 | Section union and difference operations |
 | Zustand | 5.0 | Editor, UI, and i18n state |
 | jsPDF | 4.2 | PDF generation |
 | svg2pdf.js | 2.7 | SVG-to-PDF rendering |
@@ -145,9 +163,11 @@ src/
     CommandPalette.tsx     Ctrl/⌘+K action search
     ToolPanel.tsx          Registry-driven drawing tools
     PropertyPanel.tsx      Typed property and style editing
+    SectionPropertiesPanel.tsx  Section results and temporary overlays
     LayerPanel.tsx         Search, tree, rename, reorder, visibility, lock
     Dialog.tsx             Accessible modal primitive
   domain/
+    section.ts             Section profile types and structural validation
     tools.ts               Exhaustive tool registry and metadata
   hooks/
     useDrawingSession.ts   Drawing-session state and preview cleanup
@@ -162,6 +182,9 @@ src/
     useEditorStore.ts      Editor state and full-document history
     useUiStore.ts          Collapsible-panel and palette state
   utils/
+    sectionGeometry.ts     Fabric-to-section conversion and curve tessellation
+    sectionBoolean.ts      Material union and cut-out operations
+    sectionProperties.ts   Area, centroid, inertia, axes, distances, and moduli
     documentSerializer.ts  Schema v2 validation, migration, restore
     historyService.ts      Serialized/abortable history restoration
     semanticObjects.ts     Linked dimensions and connectors
@@ -171,6 +194,12 @@ e2e/                       Playwright scenarios
 ```
 
 ## Changelog
+
+### Unreleased
+
+- Added CAD section profiles with material union, cut-outs, convex-corner fillets, and geometric section-property results
+- Added robust ring/topology validation, large-coordinate numerical stabilization, principal-axis calculation, and large-profile Worker analysis
+- Preserved section profiles through history, JSON/auto-save/projects/symbols/cloning and SVG/PNG/PDF/DXF export
 
 ### v1.1.0
 

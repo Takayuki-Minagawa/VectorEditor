@@ -14,6 +14,8 @@ import {
   styleKindForObject,
 } from '../utils/stylePresets';
 import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
+import { getFabricMetadata } from '../utils/fabricObjectMetadata';
+import SectionPropertiesPanel from './SectionPropertiesPanel';
 
 interface ObjProps {
   left: number; top: number; width: number; height: number; angle: number;
@@ -52,6 +54,7 @@ export default function PropertyPanel() {
   const [props, setProps] = useState<ObjProps>(defaultProps);
   const [isText, setIsText] = useState(false);
   const [isRect, setIsRect] = useState(false);
+  const [selectedObject, setSelectedObject] = useState<fabric.FabricObject | null>(null);
   const presetId = useId();
   const opacityId = useId();
   const fontId = useId();
@@ -60,7 +63,8 @@ export default function PropertyPanel() {
   const readProps = useCallback(() => {
     if (!canvas) return;
     const obj = canvas.getActiveObject();
-    if (!obj) { setProps(defaultProps); return; }
+    if (!obj) { setProps(defaultProps); setSelectedObject(null); return; }
+    setSelectedObject(obj);
     const displayWidth = obj.getScaledWidth();
     const displayHeight = obj.getScaledHeight();
     const appearance = captureEditorStyle(obj);
@@ -310,6 +314,9 @@ export default function PropertyPanel() {
               <NumberField label={t('lineHeight')} value={props.lineHeight} onChange={(value) => updateProp('lineHeight', value)} onBlur={commitChange} min={0.5} max={3} step={0.1} />
             </div>
           )}
+          {canvas && selectedObject
+            && getFabricMetadata(selectedObject).objectKind === 'sectionProfile'
+            && <SectionPropertiesPanel canvas={canvas} object={selectedObject} />}
         </>
       )}
 

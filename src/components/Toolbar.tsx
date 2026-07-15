@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { captureCurrentEditorSnapshot, useEditorStore } from '../store/useEditorStore';
 import { useUiStore } from '../store/useUiStore';
@@ -20,6 +20,8 @@ import {
 import NumericMoveDialog from './NumericMoveDialog';
 import ExportDialog from './ExportDialog';
 import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
+import { OPEN_SECTION_OPERATIONS_EVENT } from '../utils/sectionUiEvents';
+import SectionOperationsDialog from './SectionOperationsDialog';
 
 type Alignment = 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom';
 
@@ -37,6 +39,7 @@ export default function Toolbar() {
   const importInputRef = useRef<HTMLInputElement>(null);
   const [showNumericMove, setShowNumericMove] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showSectionOperations, setShowSectionOperations] = useState(false);
   const canvas = useEditorStore((s) => s.canvas);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
@@ -58,6 +61,12 @@ export default function Toolbar() {
 
   const cadWidth = useEditorStore((s) => s.cadWidth);
   const cadHeight = useEditorStore((s) => s.cadHeight);
+
+  useEffect(() => {
+    const openSectionDialog = () => setShowSectionOperations(true);
+    window.addEventListener(OPEN_SECTION_OPERATIONS_EVENT, openSectionDialog);
+    return () => window.removeEventListener(OPEN_SECTION_OPERATIONS_EVENT, openSectionDialog);
+  }, []);
 
   const handleSaveJSON = () => {
     if (!canvas) return;
@@ -301,6 +310,20 @@ export default function Toolbar() {
       <div className="toolbar-separator" />
 
       <div className="toolbar-group">
+        <span className="toolbar-group-label">{t('section')}</span>
+        <button
+          className="toolbar-btn"
+          onClick={() => setShowSectionOperations(true)}
+          title={t('sectionDialogTitle')}
+          disabled={!canvas || drawingMode !== 'cad' || isRestoring}
+        >
+          {t('section')}
+        </button>
+      </div>
+
+      <div className="toolbar-separator" />
+
+      <div className="toolbar-group">
         <span className="toolbar-group-label">{t('edit')}</span>
         <button className="toolbar-btn" onClick={undo} disabled={isRestoring || historyIndex <= 0} title={t('tip_undo')}>{t('undo')}</button>
         <button className="toolbar-btn" onClick={redo} disabled={isRestoring || historyIndex >= historyLength - 1} title={t('tip_redo')}>{t('redo')}</button>
@@ -358,6 +381,9 @@ export default function Toolbar() {
       )}
       {showExport && (
         <ExportDialog onClose={() => setShowExport(false)} />
+      )}
+      {showSectionOperations && (
+        <SectionOperationsDialog onClose={() => setShowSectionOperations(false)} />
       )}
     </div>
   );

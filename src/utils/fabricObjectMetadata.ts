@@ -1,5 +1,6 @@
 import * as fabric from 'fabric';
 import type { CadUnit } from '../types';
+import type { SectionProfileData } from '../domain/section';
 
 /**
  * Semantic anchors are stored in document coordinates.  `objectId` and
@@ -52,6 +53,7 @@ export interface FabricSemanticMetadata {
   locked?: boolean;
   dimensionData?: DimensionData;
   connectorData?: ConnectorData;
+  sectionProfileData?: SectionProfileData;
   latexSource?: string;
   latexFontSize?: number;
 }
@@ -70,9 +72,20 @@ export const FABRIC_CUSTOM_PROPERTIES = [
   'locked',
   'dimensionData',
   'connectorData',
+  'sectionProfileData',
   'latexSource',
   'latexFontSize',
 ] as const satisfies readonly (keyof FabricSemanticMetadata)[];
+
+// Fabric clone() serializes without an explicit properties list. Register all
+// persistent document metadata once so duplicate, copy/paste, and Alt-drag
+// preserve the semantic payload as well as JSON save/load does.
+fabric.FabricObject.customProperties = [
+  ...new Set([
+    ...fabric.FabricObject.customProperties,
+    ...FABRIC_CUSTOM_PROPERTIES,
+  ]),
+];
 
 export function getFabricMetadata(object: fabric.FabricObject): FabricSemanticMetadata {
   const metadata = object as FabricObjectWithMetadata;
@@ -83,6 +96,7 @@ export function getFabricMetadata(object: fabric.FabricObject): FabricSemanticMe
     locked: metadata.locked,
     dimensionData: metadata.dimensionData,
     connectorData: metadata.connectorData,
+    sectionProfileData: metadata.sectionProfileData,
     latexSource: metadata.latexSource,
     latexFontSize: metadata.latexFontSize,
   };

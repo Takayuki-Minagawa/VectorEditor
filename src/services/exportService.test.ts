@@ -3,10 +3,14 @@ import {
   calculateCadPageGeometry,
   calculateIllustrationGeometry,
   calculateVisibleBounds,
+  createExportArtifact,
   isClipboardExportSupported,
   normalizeExportFileName,
 } from './exportService';
 import type * as fabric from 'fabric';
+import * as fabricRuntime from 'fabric';
+import type { SectionProfileData } from '../domain/section';
+import { createSectionPath } from '../utils/sectionShapeFactory';
 
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 
@@ -123,5 +127,72 @@ describe('clipboard support detection', () => {
 
     expect(isClipboardExportSupported('png')).toBe(true);
     expect(isClipboardExportSupported('svg')).toBe(false);
+  });
+});
+
+describe('section profile export integration', () => {
+  it('preserves compound holes in SVG and section metadata in DXF', async () => {
+    const profile: SectionProfileData = {
+      version: 1,
+      analysisToleranceMm: 0.01,
+      approximate: true,
+      rings: [
+        {
+          role: 'outer',
+          points: [
+            { x: 10, y: -10 }, { x: 110, y: -10 },
+            { x: 110, y: -70 }, { x: 10, y: -70 },
+          ],
+        },
+        {
+          role: 'hole',
+          points: [
+            { x: 40, y: -30 }, { x: 40, y: -50 },
+            { x: 80, y: -50 }, { x: 80, y: -30 },
+          ],
+        },
+      ],
+    };
+    const canvas = new fabricRuntime.Canvas();
+    canvas.add(createSectionPath(profile, { fill: '#999999', strokeWidth: 0 }));
+
+    try {
+      const base = {
+        canvas,
+        documentWidth: 200,
+        documentHeight: 100,
+        cadWidth: 200,
+        cadHeight: 100,
+        scope: 'content' as const,
+        margin: 0,
+        background: null,
+        multiplier: 1,
+        fileName: 'section',
+      };
+      const svg = await createExportArtifact({
+        ...base,
+        drawingMode: 'illustration',
+        format: 'svg',
+      });
+      const svgText = await svg.blob.text();
+      expect(svgText).toMatch(/fill-rule:\s*evenodd|fill-rule="evenodd"/);
+
+      const dxf = await createExportArtifact({
+        ...base,
+        drawingMode: 'cad',
+        format: 'dxf',
+      });
+      const dxfText = await dxf.blob.text();
+      expect(dxfText.match(/0\r\nPOLYLINE\r\n/g)).toHaveLength(2);
+      expect(dxf.warnings).toEqual([expect.objectContaining({
+        code: 'dxfApproximated',
+        details: expect.arrayContaining([
+          'SectionProfileApproximation',
+          'SectionProfileHoles',
+        ]),
+      })]);
+    } finally {
+      canvas.dispose();
+    }
   });
 });

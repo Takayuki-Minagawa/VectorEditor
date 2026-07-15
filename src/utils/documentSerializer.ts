@@ -13,6 +13,8 @@ import {
 } from './fabricObjectMetadata';
 import { historyService } from './historyService';
 import { ensureObjectIdsRecursive } from './objectIds';
+import { validateSectionProfileData, type SectionProfileData } from '../domain/section';
+import { assertValidSectionProfileTopology } from './sectionTopology';
 
 export const DOCUMENT_VERSION = 2;
 export const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
@@ -23,6 +25,8 @@ export const MAX_FABRIC_OBJECTS = 100_000;
 const MAX_JSON_DEPTH = 100;
 const MAX_JSON_NODES = 1_000_000;
 const MAX_GUIDES = 10_000;
+const MAX_SECTION_RINGS = 10_000;
+const MAX_SECTION_POINTS = 100_000;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -150,7 +154,10 @@ function validateJsonValue(
   if (budget.nodes > MAX_JSON_NODES) throw new Error('Fabric JSON is too complex');
   if (depth > MAX_JSON_DEPTH) throw new Error('Fabric JSON is nested too deeply');
 
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return;
+  // Fabric's in-memory `toObject()` payload can retain optional properties as
+  // `undefined` (for example `strokeDashArray`). JSON files cannot contain
+  // that value, but history restores validate the in-memory payload directly.
+  if (value === undefined || value === null || typeof value === 'boolean' || typeof value === 'string') return;
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new Error(`${path} contains a non-finite number`);
     return;
@@ -184,11 +191,62 @@ function validateSerializedCanvas(value: unknown): SerializedCanvasData {
   if (!Array.isArray(record.objects)) throw new Error('objects.objects must be an array');
   if (record.objects.length > MAX_FABRIC_OBJECTS) throw new Error('Document contains too many objects');
 
+  // Enforce the generic complexity/depth budget before the section-specific
+  // walk so a maliciously deep Fabric group cannot overflow the call stack.
+  validateJsonValue(record, 'objects', 0, { nodes: 0 });
+
+  const validateObjectSectionData = (object: UnknownRecord, path: string): void => {
+    if (object.sectionProfileData !== undefined) {
+      const sectionData = object.sectionProfileData;
+      if (isRecord(sectionData) && Array.isArray(sectionData.rings)) {
+        if (sectionData.rings.length > MAX_SECTION_RINGS) {
+          throw new Error(`${path}.sectionProfileData contains too many rings`);
+        }
+        let pointCount = 0;
+        sectionData.rings.forEach((candidate) => {
+          if (isRecord(candidate) && Array.isArray(candidate.points)) {
+            pointCount += candidate.points.length;
+            if (pointCount > MAX_SECTION_POINTS) {
+              throw new Error(`${path}.sectionProfileData contains too many points`);
+            }
+          }
+        });
+      }
+
+      const validation = validateSectionProfileData(object.sectionProfileData);
+      if (!validation.valid) {
+        throw new Error(`${path}.sectionProfileData is invalid: ${validation.issues[0]?.message ?? 'unknown error'}`);
+      }
+      const profile = object.sectionProfileData as SectionProfileData;
+      assertValidSectionProfileTopology(profile);
+      if (profile.analysisToleranceMm > MAX_CAD_DIMENSION) {
+        throw new Error(`${path}.sectionProfileData tolerance is outside the supported range`);
+      }
+      profile.rings.forEach((ring) => ring.points.forEach((point) => {
+        if (Math.abs(point.x) > MAX_CAD_DIMENSION || Math.abs(point.y) > MAX_CAD_DIMENSION) {
+          throw new Error(`${path}.sectionProfileData coordinate is outside the supported range`);
+        }
+      }));
+    }
+    if (object.objectKind === 'sectionProfile' && object.sectionProfileData === undefined) {
+      throw new Error(`${path}.sectionProfileData is required for a sectionProfile object`);
+    }
+    if (object.sectionProfileData !== undefined && object.objectKind !== 'sectionProfile') {
+      throw new Error(`${path}.objectKind must be sectionProfile when sectionProfileData is present`);
+    }
+    if (Array.isArray(object.objects)) {
+      object.objects.forEach((child, childIndex) => {
+        const childObject = assertRecord(child, `${path}.objects[${childIndex}]`);
+        validateObjectSectionData(childObject, `${path}.objects[${childIndex}]`);
+      });
+    }
+  };
+
   record.objects.forEach((item, index) => {
     const object = assertRecord(item, `objects.objects[${index}]`);
     assertString(object.type, `objects.objects[${index}].type`, 128);
+    validateObjectSectionData(object, `objects.objects[${index}]`);
   });
-  validateJsonValue(record, 'objects', 0, { nodes: 0 });
   return record as SerializedCanvasData;
 }
 
