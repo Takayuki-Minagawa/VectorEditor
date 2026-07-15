@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as fabric from 'fabric';
 import {
+  deleteSelected,
   duplicateActive,
   executeCanvasCommand,
   executeCanvasTransaction,
+  groupSelection,
   moveActiveBy,
+  stackActive,
+  toggleActiveLock,
+  ungroupActive,
 } from './canvasCommands';
 import { getFabricMetadata, setFabricMetadataValues } from './fabricObjectMetadata';
 import { historyService } from './historyService';
@@ -95,6 +100,177 @@ describe('canvas command transactions', () => {
       y: initialCenter.y + 15,
     });
     expect(pushHistory).toHaveBeenCalledOnce();
+  });
+
+  it('propagates every child ID when moving an ActiveSelection', () => {
+    const first = new fabric.Rect({ left: 20, top: 20, width: 20, height: 20 });
+    const second = new fabric.Rect({ left: 80, top: 30, width: 20, height: 20 });
+    setFabricMetadataValues(first, { id: 'selected-first', objectKind: 'rect' });
+    setFabricMetadataValues(second, { id: 'selected-second', objectKind: 'rect' });
+    const selection = new fabric.ActiveSelection([first, second]);
+    const firstConnector = createSemanticConnector({
+      from: { ...first.getCenterPoint(), objectId: 'selected-first', anchor: 'center' },
+      to: { x: 20, y: 120 },
+      route: 'straight',
+    })!;
+    const secondConnector = createSemanticConnector({
+      from: { ...second.getCenterPoint(), objectId: 'selected-second', anchor: 'center' },
+      to: { x: 80, y: 120 },
+      route: 'straight',
+    })!;
+    const canvas = {
+      getActiveObject: () => selection,
+      getObjects: () => [first, second, firstConnector, secondConnector],
+      requestRenderAll: vi.fn(),
+    } as unknown as fabric.Canvas;
+
+    expect(moveActiveBy(canvas, 15, 10, vi.fn())).toBe(true);
+    expect(getFabricMetadata(firstConnector).connectorData?.from)
+      .toMatchObject({ x: 35, y: 30 });
+    expect(getFabricMetadata(secondConnector).connectorData?.from)
+      .toMatchObject({ x: 95, y: 40 });
+  });
+
+  it('expands a deeply nested changed group only once', () => {
+    const leaf = new fabric.Rect({ left: 10, top: 10, width: 10, height: 10 });
+    setFabricMetadataValues(leaf, { objectKind: 'rect' });
+    const nestedObjects: fabric.FabricObject[] = [leaf];
+    let root: fabric.FabricObject = leaf;
+    for (let depth = 0; depth < 40; depth += 1) {
+      root = new fabric.Group([root]);
+      setFabricMetadataValues(root, { objectKind: 'group' });
+      nestedObjects.push(root);
+    }
+    const idReads = nestedObjects.map(() => 0);
+    nestedObjects.forEach((object, index) => {
+      Object.defineProperty(object, 'id', {
+        configurable: true,
+        get: () => {
+          idReads[index] += 1;
+          return `nested-${index}`;
+        },
+      });
+    });
+    const initialCenter = leaf.getCenterPoint();
+    const connector = createSemanticConnector({
+      from: { ...initialCenter, objectId: 'nested-0', anchor: 'center' },
+      to: { x: initialCenter.x + 100, y: initialCenter.y },
+      route: 'straight',
+    })!;
+    const canvas = {
+      getActiveObject: () => root,
+      getObjects: () => [root, connector],
+      requestRenderAll: vi.fn(),
+    } as unknown as fabric.Canvas;
+
+    expect(moveActiveBy(canvas, 5, 7, vi.fn())).toBe(true);
+    const movedCenter = leaf.getCenterPoint();
+    expect(getFabricMetadata(connector).connectorData?.from.x).toBeCloseTo(movedCenter.x);
+    expect(getFabricMetadata(connector).connectorData?.from.y).toBeCloseTo(movedCenter.y);
+    // One root-ID read in the command, then one index pass and one subtree
+    // expansion, plus a constant number of reads while deriving leaf snap
+    // candidates. Passing every descendant ID would grow toward O(N * depth).
+    expect(idReads.reduce((total, reads) => total + reads, 0))
+      .toBeLessThanOrEqual(nestedObjects.length * 2 + 16);
+  });
+
+  it('skips semantic tree work for stacking and lock-only commands', () => {
+    const active = new fabric.Rect({ width: 20, height: 20 });
+    const getObjects = vi.fn(() => [active]);
+    const stackCanvas = {
+      getActiveObject: () => active,
+      getObjects,
+      bringObjectForward: vi.fn(),
+      requestRenderAll: vi.fn(),
+    } as unknown as fabric.Canvas;
+    const stackHistory = vi.fn();
+
+    expect(stackActive(stackCanvas, 'bringForward', stackHistory)).toBe(true);
+    expect(getObjects).not.toHaveBeenCalled();
+    expect(stackHistory).toHaveBeenCalledOnce();
+
+    const lockCanvas = {
+      getActiveObject: () => active,
+      getObjects,
+      requestRenderAll: vi.fn(),
+    } as unknown as fabric.Canvas;
+    const lockHistory = vi.fn();
+    expect(toggleActiveLock(lockCanvas, lockHistory)).toBe(true);
+    expect(getObjects).not.toHaveBeenCalled();
+    expect(lockHistory).toHaveBeenCalledOnce();
+  });
+
+  it('keeps linked fallback geometry stable when deleting multiple sources', () => {
+    const first = new fabric.Rect({ left: 20, top: 20, width: 20, height: 20 });
+    const second = new fabric.Rect({ left: 80, top: 30, width: 20, height: 20 });
+    setFabricMetadataValues(first, { id: 'delete-first', objectKind: 'rect' });
+    setFabricMetadataValues(second, { id: 'delete-second', objectKind: 'rect' });
+    const connector = createSemanticConnector({
+      from: { ...first.getCenterPoint(), objectId: 'delete-first', anchor: 'center' },
+      to: { ...second.getCenterPoint(), objectId: 'delete-second', anchor: 'center' },
+      route: 'straight',
+    })!;
+    const roots: fabric.FabricObject[] = [first, second, connector];
+    const canvas = {
+      getActiveObjects: () => [first, second],
+      getObjects: () => roots,
+      remove: vi.fn((object: fabric.FabricObject) => {
+        const index = roots.indexOf(object);
+        if (index >= 0) roots.splice(index, 1);
+      }),
+      discardActiveObject: vi.fn(),
+      requestRenderAll: vi.fn(),
+    } as unknown as fabric.Canvas;
+    const pushHistory = vi.fn();
+
+    expect(deleteSelected(canvas, pushHistory)).toBe(true);
+    expect(getFabricMetadata(connector).connectorData).toMatchObject({
+      from: { x: 20, y: 20, objectId: 'delete-first' },
+      to: { x: 80, y: 30, objectId: 'delete-second' },
+    });
+    expect(pushHistory).toHaveBeenCalledOnce();
+  });
+
+  it('preserves child-linked connector geometry across group and ungroup', () => {
+    const source = new fabric.Rect({ left: 20, top: 20, width: 20, height: 20 });
+    const peer = new fabric.Rect({ left: 80, top: 30, width: 20, height: 20 });
+    setFabricMetadataValues(source, { id: 'group-source', objectKind: 'rect' });
+    setFabricMetadataValues(peer, { id: 'group-peer', objectKind: 'rect' });
+    const connector = createSemanticConnector({
+      from: { ...source.getCenterPoint(), objectId: 'group-source', anchor: 'center' },
+      to: { x: 150, y: 100 },
+      route: 'straight',
+    })!;
+    const selection = new fabric.ActiveSelection([source, peer]);
+    const roots: fabric.FabricObject[] = [source, peer, connector];
+    let active: fabric.FabricObject = selection;
+    const canvas = {
+      getActiveObject: () => active,
+      getObjects: () => roots,
+      remove: vi.fn((object: fabric.FabricObject) => {
+        const index = roots.indexOf(object);
+        if (index >= 0) roots.splice(index, 1);
+      }),
+      add: vi.fn((object: fabric.FabricObject) => roots.push(object)),
+      setActiveObject: vi.fn((object: fabric.FabricObject) => {
+        active = object;
+      }),
+      discardActiveObject: vi.fn(),
+      fire: vi.fn(),
+      requestRenderAll: vi.fn(),
+    } as unknown as fabric.Canvas;
+    const pushHistory = vi.fn();
+
+    expect(groupSelection(canvas, pushHistory)).toBe(true);
+    expect(active).toBeInstanceOf(fabric.Group);
+    expect(getFabricMetadata(connector).connectorData?.from)
+      .toMatchObject({ x: 20, y: 20 });
+
+    expect(ungroupActive(canvas, pushHistory)).toBe(true);
+    expect(active).toBeInstanceOf(fabric.ActiveSelection);
+    expect(getFabricMetadata(connector).connectorData?.from)
+      .toMatchObject({ x: 20, y: 20 });
+    expect(pushHistory).toHaveBeenCalledTimes(2);
   });
 
   it('discards an asynchronous clone that began before a document restore', async () => {

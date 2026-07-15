@@ -1,5 +1,5 @@
 import * as fabric from 'fabric';
-import { setPersistentObjectLocked } from './fabricObjectMetadata';
+import { getFabricMetadata, setPersistentObjectLocked } from './fabricObjectMetadata';
 import {
   assignNewObjectId,
   ensureObjectIdsRecursive,
@@ -7,6 +7,7 @@ import {
 } from './objectIds';
 import { updateLinkedSemanticObjects } from './semanticObjects';
 import { historyService } from './historyService';
+import { collectFabricObjectTree } from './fabricObjectTree';
 
 export type PushHistory = () => void;
 export type SetClipboard = (objects: fabric.FabricObject[] | null) => void;
@@ -20,7 +21,16 @@ export interface CanvasCommandOptions<T> {
   render?: boolean;
   recordHistory?: boolean;
   didChange?: (result: T) => boolean;
+  /**
+   * Limit associative dimension/connector refresh work performed at commit.
+   * Omitted means all semantic objects for backwards-compatible low-level
+   * callers; commands should pass IDs for geometry changes or `none` when the
+   * document geometry is unchanged.
+   */
+  semanticUpdate?: SemanticUpdateScope | ((result: T) => SemanticUpdateScope);
 }
+
+export type SemanticUpdateScope = 'all' | 'none' | readonly string[];
 
 let defaultPushHistory: PushHistory | undefined;
 
@@ -44,8 +54,14 @@ function commitCommand(
   { canvas, pushHistory }: CanvasCommandContext,
   render: boolean,
   recordHistory: boolean,
+  semanticUpdate: SemanticUpdateScope,
 ): void {
-  if (recordHistory) updateLinkedSemanticObjects(canvas);
+  if (recordHistory && semanticUpdate !== 'none') {
+    const changedIds = semanticUpdate === 'all' ? undefined : semanticUpdate;
+    if (!changedIds || changedIds.length > 0) {
+      updateLinkedSemanticObjects(canvas, undefined, changedIds);
+    }
+  }
   if (render) canvas.requestRenderAll();
   if (recordHistory) (pushHistory ?? defaultPushHistory)?.();
 }
@@ -61,10 +77,14 @@ function runCanvasCommand<T>(
 ): T | Promise<T> {
   const finish = (result: T): T => {
     if (commandChanged(result, options)) {
+      const semanticUpdate = typeof options.semanticUpdate === 'function'
+        ? options.semanticUpdate(result)
+        : options.semanticUpdate ?? 'all';
       commitCommand(
         context,
         options.render !== false,
         options.recordHistory !== false,
+        semanticUpdate,
       );
     }
     return result;
@@ -123,6 +143,31 @@ function addObjectOrSelection(canvas: fabric.Canvas, object: fabric.FabricObject
   return object;
 }
 
+function collectSemanticUpdateIds(
+  objects: readonly fabric.FabricObject[],
+  includeDescendants = false,
+): string[] {
+  const ids = new Set<string>();
+  const addRoot = (object: fabric.FabricObject): void => {
+    // ActiveSelection is interaction-only. Its children are document roots
+    // and are expanded once by updateLinkedSemanticObjects.
+    if (object instanceof fabric.ActiveSelection) {
+      object.getObjects().forEach(addRoot);
+      return;
+    }
+    const id = getFabricMetadata(object).id;
+    if (id) ids.add(id);
+  };
+  if (includeDescendants) {
+    collectFabricObjectTree(objects).forEach((object) => {
+      if (!(object instanceof fabric.ActiveSelection)) addRoot(object);
+    });
+  } else {
+    objects.forEach(addRoot);
+  }
+  return [...ids];
+}
+
 export function selectAll(canvas: fabric.Canvas): boolean {
   return executeCanvasCommand(
     { canvas },
@@ -158,6 +203,7 @@ export function pasteClipboard(
   pushHistory: PushHistory,
 ): boolean {
   if (!clipboard || clipboard.length === 0) return false;
+  let semanticUpdateIds: string[] = [];
   const operation = executeCanvasCommand(
     { canvas, pushHistory },
     async () => {
@@ -175,8 +221,10 @@ export function pasteClipboard(
       const active = addObjectOrSelection(canvas, cloned);
       canvas.setActiveObject(active);
       setClipboard([active]);
+      semanticUpdateIds = collectSemanticUpdateIds([active]);
       return true;
     },
+    { semanticUpdate: () => semanticUpdateIds },
   );
   // Preserve the existing immediate boolean API. Async users can call
   // executeCanvasCommand directly and await its result.
@@ -187,6 +235,7 @@ export function pasteClipboard(
 export function duplicateActive(canvas: fabric.Canvas, pushHistory: PushHistory): boolean {
   const active = canvas.getActiveObject();
   if (!active) return false;
+  let semanticUpdateIds: string[] = [];
   const operation = executeCanvasCommand(
     { canvas, pushHistory },
     async () => {
@@ -203,52 +252,78 @@ export function duplicateActive(canvas: fabric.Canvas, pushHistory: PushHistory)
       });
       const duplicated = addObjectOrSelection(canvas, cloned);
       canvas.setActiveObject(duplicated);
+      semanticUpdateIds = collectSemanticUpdateIds([duplicated]);
       return true;
     },
+    { semanticUpdate: () => semanticUpdateIds },
   );
   void operation.catch(() => undefined);
   return true;
 }
 
 export function deleteSelected(canvas: fabric.Canvas, pushHistory: PushHistory): boolean {
-  return executeCanvasCommand({ canvas, pushHistory }, () => {
-    const active = canvas.getActiveObjects();
-    if (active.length === 0) return false;
-    active.forEach((object) => canvas.remove(object));
-    canvas.discardActiveObject();
-    return true;
-  });
+  let semanticUpdateIds: string[] = [];
+  return executeCanvasCommand(
+    { canvas, pushHistory },
+    () => {
+      const active = canvas.getActiveObjects();
+      if (active.length === 0) return false;
+      // Deleted groups are absent from the post-mutation index, so retain all
+      // descendant IDs while the object trees are still available.
+      semanticUpdateIds = collectSemanticUpdateIds(active, true);
+      active.forEach((object) => canvas.remove(object));
+      canvas.discardActiveObject();
+      return true;
+    },
+    { semanticUpdate: () => semanticUpdateIds },
+  );
 }
 
 export function groupSelection(canvas: fabric.Canvas, pushHistory: PushHistory): boolean {
-  return executeCanvasCommand({ canvas, pushHistory }, () => {
-    const active = canvas.getActiveObject();
-    if (!(active instanceof fabric.ActiveSelection)) return false;
-    const objects = active.getObjects();
-    canvas.discardActiveObject();
-    const group = new fabric.Group(objects);
-    assignNewObjectId(group, 'group');
-    objects.forEach((object) => canvas.remove(object));
-    canvas.add(group);
-    canvas.setActiveObject(group);
-    return true;
-  });
+  let semanticUpdateIds: string[] = [];
+  return executeCanvasCommand(
+    { canvas, pushHistory },
+    () => {
+      const active = canvas.getActiveObject();
+      if (!(active instanceof fabric.ActiveSelection)) return false;
+      const objects = active.getObjects();
+      canvas.discardActiveObject();
+      const group = new fabric.Group(objects);
+      assignNewObjectId(group, 'group');
+      objects.forEach((object) => canvas.remove(object));
+      canvas.add(group);
+      canvas.setActiveObject(group);
+      semanticUpdateIds = collectSemanticUpdateIds([group]);
+      return true;
+    },
+    { semanticUpdate: () => semanticUpdateIds },
+  );
 }
 
 export function ungroupActive(canvas: fabric.Canvas, pushHistory: PushHistory): boolean {
-  return executeCanvasCommand({ canvas, pushHistory }, () => {
-    const active = canvas.getActiveObject();
-    if (!(active instanceof fabric.Group)) return false;
-    const items = [...active.getObjects()];
-    active.remove(...items);
-    canvas.remove(active);
-    items.forEach((item) => {
-      ensureObjectIdsRecursive(item);
-      canvas.add(item);
-    });
-    canvas.setActiveObject(new fabric.ActiveSelection(items, { canvas }));
-    return true;
-  });
+  let semanticUpdateIds: string[] = [];
+  return executeCanvasCommand(
+    { canvas, pushHistory },
+    () => {
+      const active = canvas.getActiveObject();
+      if (!(active instanceof fabric.Group)) return false;
+      const removedGroupId = collectSemanticUpdateIds([active]);
+      const items = [...active.getObjects()];
+      active.remove(...items);
+      canvas.remove(active);
+      items.forEach((item) => {
+        ensureObjectIdsRecursive(item);
+        canvas.add(item);
+      });
+      semanticUpdateIds = [
+        ...removedGroupId,
+        ...collectSemanticUpdateIds(items),
+      ];
+      canvas.setActiveObject(new fabric.ActiveSelection(items, { canvas }));
+      return true;
+    },
+    { semanticUpdate: () => semanticUpdateIds },
+  );
 }
 
 export function moveActiveBy(
@@ -257,16 +332,22 @@ export function moveActiveBy(
   dy: number,
   pushHistory: PushHistory,
 ): boolean {
-  return executeCanvasCommand({ canvas, pushHistory }, () => {
-    const active = canvas.getActiveObject();
-    if (!active) return false;
-    active.set({
-      left: (active.left || 0) + dx,
-      top: (active.top || 0) + dy,
-    });
-    active.setCoords();
-    return true;
-  });
+  let semanticUpdateIds: string[] = [];
+  return executeCanvasCommand(
+    { canvas, pushHistory },
+    () => {
+      const active = canvas.getActiveObject();
+      if (!active) return false;
+      active.set({
+        left: (active.left || 0) + dx,
+        top: (active.top || 0) + dy,
+      });
+      active.setCoords();
+      semanticUpdateIds = collectSemanticUpdateIds([active]);
+      return true;
+    },
+    { semanticUpdate: () => semanticUpdateIds },
+  );
 }
 
 export type StackCommand = 'bringForward' | 'sendBackward' | 'bringToFront' | 'sendToBack';
@@ -294,7 +375,7 @@ export function stackActive(
         break;
     }
     return true;
-  });
+  }, { semanticUpdate: 'none' });
 }
 
 export function flipActive(
@@ -302,14 +383,20 @@ export function flipActive(
   axis: 'x' | 'y',
   pushHistory: PushHistory,
 ): boolean {
-  return executeCanvasCommand({ canvas, pushHistory }, () => {
-    const active = canvas.getActiveObject();
-    if (!active) return false;
-    if (axis === 'x') active.set('flipX', !active.flipX);
-    else active.set('flipY', !active.flipY);
-    active.setCoords();
-    return true;
-  });
+  let semanticUpdateIds: string[] = [];
+  return executeCanvasCommand(
+    { canvas, pushHistory },
+    () => {
+      const active = canvas.getActiveObject();
+      if (!active) return false;
+      if (axis === 'x') active.set('flipX', !active.flipX);
+      else active.set('flipY', !active.flipY);
+      active.setCoords();
+      semanticUpdateIds = collectSemanticUpdateIds([active]);
+      return true;
+    },
+    { semanticUpdate: () => semanticUpdateIds },
+  );
 }
 
 export function toggleActiveLock(canvas: fabric.Canvas, pushHistory?: PushHistory): boolean {
@@ -321,5 +408,5 @@ export function toggleActiveLock(canvas: fabric.Canvas, pushHistory?: PushHistor
     objects.forEach((object) => setPersistentObjectLocked(object, shouldLock));
     active.set({ hasControls: !shouldLock });
     return true;
-  });
+  }, { semanticUpdate: 'none' });
 }

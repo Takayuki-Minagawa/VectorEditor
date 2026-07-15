@@ -64,7 +64,7 @@
 |---|---|---|
 | `npm run lint` | ✅ 成功 | ESLint errorなし |
 | `npm run typecheck` | ✅ 成功 | `tsc -b` |
-| `npm run test:run` | ✅ 成功 | 19 files / 76 tests |
+| `npm run test:run` | ✅ 成功 | 19 files / 98 tests |
 | `npm run build` | ✅ 成功 | TypeScript build + Vite production build |
 | `npm audit` / `npm run audit:prod` | ✅ 成功 | 0 vulnerabilities |
 | `npm run test:e2e` | ✅ 成功 | Chromiumで5 scenarios |

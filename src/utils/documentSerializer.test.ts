@@ -8,6 +8,7 @@ import {
   restoreDocumentData,
 } from './documentSerializer';
 import type { CanvasSnapshot } from './documentSerializer';
+import { historyService } from './historyService';
 import {
   applyPersistentObjectState,
   FABRIC_CUSTOM_PROPERTIES,
@@ -199,6 +200,59 @@ describe('document schema', () => {
       background: '#00ff00',
       mode: 'illustration',
     });
+  });
+
+  it('does not let a completed older restore publish after a newer restore takes ownership', async () => {
+    const first: CanvasSnapshot = {
+      canvas: { width: 320, height: 240, backgroundColor: '#ff0000' },
+      objects: { objects: [] },
+      drawingMode: 'cad',
+    };
+    const replacement: CanvasSnapshot = {
+      canvas: { width: 1024, height: 768, backgroundColor: '#00ff00' },
+      objects: { objects: [] },
+      drawingMode: 'illustration',
+    };
+    const canvas = {
+      renderOnAddRemove: true,
+      loadFromJSON: vi.fn().mockResolvedValue(undefined),
+      getObjects: () => [],
+      requestRenderAll: vi.fn(),
+    } as unknown as fabric.Canvas;
+    const actions = {
+      setCanvasSize: vi.fn(),
+      setBackgroundColor: vi.fn(),
+      setDrawingMode: vi.fn(),
+      setCadUnit: vi.fn(),
+      setScale: vi.fn(),
+      setCadSize: vi.fn(),
+    };
+    const notify = vi.spyOn(historyService, 'notifyDocumentRestored');
+    let armed = false;
+    let replacementRestore: Promise<void> | undefined;
+
+    historyService.setRestoringListener((restoring) => {
+      if (armed && !restoring && !replacementRestore) {
+        replacementRestore = restoreDocumentData(canvas, replacement, actions);
+      }
+    });
+    armed = true;
+
+    try {
+      await expect(restoreDocumentData(canvas, first, actions))
+        .rejects.toBeInstanceOf(DocumentRestoreSupersededError);
+      expect(replacementRestore).toBeDefined();
+      await replacementRestore;
+
+      expect(notify).toHaveBeenCalledOnce();
+      expect(notify.mock.calls[0][0]).toMatchObject({
+        canvas: replacement.canvas,
+        drawingMode: replacement.drawingMode,
+      });
+    } finally {
+      historyService.setRestoringListener(null);
+      notify.mockRestore();
+    }
   });
 });
 

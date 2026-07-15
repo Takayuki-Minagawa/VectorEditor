@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import * as fabric from 'fabric';
 import { exportObjectsToDxf } from './dxfExporter';
 
+function firstEntityValue(text: string, entity: string, groupCode: number): number {
+  const values = text.trimEnd().split('\r\n');
+  for (let index = 0; index < values.length - 1; index += 2) {
+    if (values[index] !== '0' || values[index + 1] !== entity) continue;
+    for (let pairIndex = index + 2; pairIndex < values.length - 1; pairIndex += 2) {
+      if (values[pairIndex] === '0') break;
+      if (values[pairIndex] === String(groupCode)) return Number(values[pairIndex + 1]);
+    }
+  }
+  throw new Error(`${entity} group code ${groupCode} was not found`);
+}
+
 describe('R12 ASCII DXF export', () => {
   it('exports supported Fabric primitives and warns about unsupported objects', () => {
     const objects: fabric.FabricObject[] = [
@@ -50,5 +62,49 @@ describe('R12 ASCII DXF export', () => {
     expect(Array.from(result.text).every((character) => character.charCodeAt(0) < 128)).toBe(true);
     expect(result.text).toContain('?? A');
     expect(result.approximatedTypes).toContain('TextEncoding');
+  });
+
+  it('uses the transformed Y axis for text height and warns about non-uniform scale', () => {
+    const text = new fabric.Text('Scaled', {
+      left: 10,
+      top: 10,
+      fontSize: 10,
+      scaleX: 2,
+      scaleY: 3,
+    });
+
+    const result = exportObjectsToDxf([text], 200, 100);
+
+    expect(firstEntityValue(result.text, 'TEXT', 40)).toBeCloseTo(30, 6);
+    expect(result.approximatedTypes).toContain('TextTransform');
+  });
+
+  it('includes Y-axis shear in text height and reports the approximation', () => {
+    const text = new fabric.Text('Skewed', {
+      left: 10,
+      top: 10,
+      fontSize: 10,
+      skewX: 30,
+    });
+
+    const matrix = text.calcTransformMatrix();
+    const expectedHeight = text.fontSize * Math.hypot(matrix[2], matrix[3]);
+    const result = exportObjectsToDxf([text], 200, 100);
+
+    expect(firstEntityValue(result.text, 'TEXT', 40)).toBeCloseTo(expectedHeight, 6);
+    expect(result.approximatedTypes).toContain('TextTransform');
+  });
+
+  it('warns when mirrored Fabric text cannot be represented by R12 TEXT', () => {
+    const text = new fabric.Text('Mirrored', {
+      left: 10,
+      top: 10,
+      fontSize: 10,
+      flipX: true,
+    });
+
+    const result = exportObjectsToDxf([text], 200, 100);
+
+    expect(result.approximatedTypes).toContain('TextTransform');
   });
 });

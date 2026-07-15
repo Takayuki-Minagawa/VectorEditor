@@ -99,12 +99,14 @@ export default function Toolbar() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !canvas) return;
-    // Capture the last known-good document before file I/O yields. Another
-    // restore may begin while a large file is being read; capturing later can
-    // produce a hybrid of that restore's settings and the previous objects.
-    const rollbackSnapshot = captureCurrentEditorSnapshot() ?? undefined;
+    // File reads can take long enough for another history/document restore to
+    // win ownership. Normal edits remain allowed; their latest state is
+    // captured only after parsing, immediately before restore begins.
+    const canStartRestore = createAsyncCanvasMutationGuard(canvas);
     try {
       const data = parseDocumentData(await file.text());
+      if (!canStartRestore()) return;
+      const rollbackSnapshot = captureCurrentEditorSnapshot() ?? undefined;
       const {
         setCanvasSize,
         setBackgroundColor,
@@ -114,6 +116,9 @@ export default function Toolbar() {
         setCadSize,
         restoreEditorSettings,
       } = useEditorStore.getState();
+      // No await belongs between the ownership check / rollback capture and
+      // this call: restoreDocumentData claims the HistoryService generation
+      // synchronously before its first suspension point.
       await restoreDocumentData(canvas, data, {
         setCanvasSize,
         setBackgroundColor,

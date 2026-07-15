@@ -108,10 +108,40 @@ function isUniformCircleTransform(object: fabric.Circle): boolean {
   return perpendicular && Math.abs(scaleX - scaleY) < 1e-7;
 }
 
-function addText(lines: string[], object: fabric.FabricText, drawingHeight: number): void {
+interface DxfTextTransform {
+  heightScale: number;
+  rotation: number;
+  approximated: boolean;
+}
+
+function getTextTransform(object: fabric.FabricText): DxfTextTransform {
   const matrix = object.calcTransformMatrix();
-  const scale = Math.hypot(matrix[0], matrix[1]);
-  const rotation = -Math.atan2(matrix[1], matrix[0]) * 180 / Math.PI;
+  const scaleX = Math.hypot(matrix[0], matrix[1]);
+  const scaleY = Math.hypot(matrix[2], matrix[3]);
+  const scaleReference = Math.max(1, scaleX, scaleY);
+  const nonUniform = Math.abs(scaleX - scaleY) > 1e-7 * scaleReference;
+  const scaleProduct = scaleX * scaleY;
+  const normalizedAxisDot = scaleProduct > 1e-12
+    ? Math.abs(matrix[0] * matrix[2] + matrix[1] * matrix[3]) / scaleProduct
+    : 0;
+  const mirrored = matrix[0] * matrix[3] - matrix[1] * matrix[2] < 0;
+  return {
+    // Text height follows the transformed local Y axis. Using the X axis
+    // scale produces visibly incorrect DXF text for scaleY/skew transforms.
+    heightScale: scaleY,
+    rotation: -Math.atan2(matrix[1], matrix[0]) * 180 / Math.PI,
+    // R12 TEXT has no mirror flag in the subset emitted here, so a reflected
+    // Fabric transform must also be disclosed as an approximation.
+    approximated: nonUniform || normalizedAxisDot > 1e-7 || mirrored,
+  };
+}
+
+function addText(
+  lines: string[],
+  object: fabric.FabricText,
+  drawingHeight: number,
+  transform: DxfTextTransform,
+): void {
   const lineStep = object.fontSize * object.lineHeight;
   const values = object.text.split(/\r?\n/);
 
@@ -125,9 +155,9 @@ function addText(lines: string[], object: fabric.FabricText, drawingHeight: numb
       ...pair(10, insertion.x),
       ...pair(20, insertion.y),
       ...pair(30, 0),
-      ...pair(40, Math.max(0.01, object.fontSize * scale)),
+      ...pair(40, Math.max(0.01, object.fontSize * transform.heightScale)),
       ...pair(1, escapeText(value)),
-      ...pair(50, rotation),
+      ...pair(50, transform.rotation),
       ...pair(7, 'STANDARD'),
     );
   });
@@ -232,7 +262,9 @@ export function exportObjectsToDxf(
 
     if (object instanceof fabric.FabricText) {
       if (hasNonAsciiText(object.text)) approximated.add('TextEncoding');
-      addText(entities, object, drawingHeight);
+      const transform = getTextTransform(object);
+      if (transform.approximated) approximated.add('TextTransform');
+      addText(entities, object, drawingHeight, transform);
       return;
     }
 

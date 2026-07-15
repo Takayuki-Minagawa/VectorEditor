@@ -360,14 +360,22 @@ export async function restoreCanvasObjects(
   canvas.requestRenderAll();
 }
 
-export function serializeCanvasSnapshot(input: CanvasStateInput): CanvasSnapshot {
+/**
+ * Compose a snapshot around an already detached Fabric payload. History may
+ * reuse that payload when only editor settings changed; callers must only pass
+ * serialized objects that are no longer mutated by the live canvas.
+ */
+export function createCanvasSnapshot(
+  input: CanvasStateInput,
+  objects: SerializedCanvasData,
+): CanvasSnapshot {
   return {
     canvas: {
       width: input.canvasWidth,
       height: input.canvasHeight,
       backgroundColor: input.backgroundColor,
     },
-    objects: serializeCanvasObjects(input.canvas),
+    objects,
     drawingMode: input.drawingMode,
     cadUnit: input.cadUnit,
     scale: input.scale,
@@ -382,6 +390,10 @@ export function serializeCanvasSnapshot(input: CanvasStateInput): CanvasSnapshot
     snapToGuides: input.snapToGuides,
     orthoMode: input.orthoMode,
   };
+}
+
+export function serializeCanvasSnapshot(input: CanvasStateInput): CanvasSnapshot {
+  return createCanvasSnapshot(input, serializeCanvasObjects(input.canvas));
 }
 
 export function createDocumentData(input: CanvasStateInput): DocumentData {
@@ -431,19 +443,6 @@ function applyRestoreActions(data: CanvasSnapshot, actions: RestoreActions): voi
   actions.restoreEditorSettings?.(data);
 }
 
-/** Restore a snapshot without altering the history stack (used by undo/redo). */
-export async function restoreCanvasSnapshot(
-  canvas: fabric.Canvas,
-  data: CanvasSnapshot,
-  actions: RestoreActions,
-  signal?: AbortSignal,
-): Promise<void> {
-  await historyService.withHistorySuspended(async () => {
-    applyRestoreActions(data, actions);
-    await restoreCanvasObjects(canvas, data.objects, signal);
-  });
-}
-
 /** Restore an opened/autosaved document and establish it as a new history root. */
 export async function restoreDocumentData(
   canvas: fabric.Canvas,
@@ -491,6 +490,11 @@ export async function restoreDocumentData(
     }
     throw error;
   }
-  if (result.status === 'skipped') throw new DocumentRestoreSupersededError();
+  if (
+    result.status === 'skipped'
+    || historyService.currentGeneration !== attempt.generation
+  ) {
+    throw new DocumentRestoreSupersededError();
+  }
   historyService.notifyDocumentRestored(validated);
 }

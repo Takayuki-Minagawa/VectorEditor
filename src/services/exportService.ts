@@ -154,15 +154,29 @@ async function createOffscreenCanvas(
   return canvas;
 }
 
-function getVisibleBounds(canvas: fabric.StaticCanvas): SceneRect | null {
-  const objects = canvas.getObjects().filter((object) => object.visible && !object.excludeFromExport);
-  if (objects.length === 0) return null;
+export function calculateVisibleBounds(
+  objects: Iterable<fabric.FabricObject>,
+): SceneRect | null {
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  let hasVisibleObject = false;
 
-  const rects = objects.map((object) => object.getBoundingRect());
-  const left = Math.min(...rects.map((rect) => rect.left));
-  const top = Math.min(...rects.map((rect) => rect.top));
-  const right = Math.max(...rects.map((rect) => rect.left + rect.width));
-  const bottom = Math.max(...rects.map((rect) => rect.top + rect.height));
+  // Avoid spreading one value per object into Math.min/Math.max. Documents
+  // may contain up to 100,000 objects, which exceeds the argument limit in
+  // some JavaScript engines.
+  for (const object of objects) {
+    if (!object.visible || object.excludeFromExport) continue;
+    const rect = object.getBoundingRect();
+    left = Math.min(left, rect.left);
+    top = Math.min(top, rect.top);
+    right = Math.max(right, rect.left + rect.width);
+    bottom = Math.max(bottom, rect.top + rect.height);
+    hasVisibleObject = true;
+  }
+
+  if (!hasVisibleObject) return null;
   return {
     left,
     top,
@@ -277,7 +291,6 @@ function createSvg(
   geometry: ExportGeometry,
   background: string | null,
   drawingMode: DrawingMode,
-  multiplier: number,
 ): string {
   const isCad = drawingMode === 'cad';
   const width = isCad
@@ -305,11 +318,8 @@ function createSvg(
       : svg.replace(/(<svg[^>]*>)/, `$1\n${rect}`);
   }
 
-  if (!isCad && multiplier !== 1) {
-    // Width/height already carry the requested multiplier; the viewBox remains
-    // in stable document coordinates so object geometry is never UI-zoom based.
-    return svg;
-  }
+  // Illustration multipliers are already reflected in artifactWidth/Height;
+  // the viewBox remains in stable document coordinates.
   return svg;
 }
 
@@ -414,7 +424,7 @@ export async function createExportArtifact(
 
   const offscreen = await createOffscreenCanvas(request.canvas, request.scope);
   try {
-    const bounds = getVisibleBounds(offscreen);
+    const bounds = calculateVisibleBounds(offscreen.getObjects());
     if (!bounds && request.scope !== 'canvas') {
       throw new DrawingExportError(
         request.scope === 'selection' ? 'NO_SELECTION' : 'NO_CONTENT',
@@ -455,7 +465,6 @@ export async function createExportArtifact(
       geometry,
       request.background,
       request.drawingMode,
-      request.multiplier,
     );
 
     let blob: Blob;

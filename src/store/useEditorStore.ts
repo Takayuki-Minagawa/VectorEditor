@@ -1,8 +1,15 @@
 import { create } from 'zustand';
 import * as fabric from 'fabric';
-import type { CadUnit, DrawingMode, Guide, ToolType } from '../types';
+import type {
+  CadUnit,
+  DrawingMode,
+  Guide,
+  SerializedCanvasData,
+  ToolType,
+} from '../types';
 import { setDefaultCanvasCommandHistory } from '../utils/canvasCommands';
 import {
+  createCanvasSnapshot,
   restoreCanvasObjects,
   serializeCanvasSnapshot,
   type CanvasSnapshot,
@@ -126,29 +133,62 @@ const MAX_HISTORY = 50;
 const MAX_HISTORY_BYTES = 32 * 1024 * 1024;
 
 let transactionDepth = 0;
-let transactionDirty = false;
+let transactionChange: HistoryChange | null = null;
 let historyRequestId = 0;
+const serializedObjectSizes = new WeakMap<SerializedCanvasData, number>();
+
+type HistoryChange = 'settings' | 'objects';
+
+function snapshotSettingsJson(snapshot: CanvasSnapshot): string {
+  // Overriding instead of manually listing settings keeps comparisons correct
+  // when CanvasSnapshot gains another setting, without traversing objects.
+  return JSON.stringify({ ...snapshot, objects: undefined });
+}
 
 function snapshotsEqual(left: CanvasSnapshot, right: CanvasSnapshot): boolean {
+  if (left.objects === right.objects) {
+    return snapshotSettingsJson(left) === snapshotSettingsJson(right);
+  }
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function serializedObjectsSize(objects: SerializedCanvasData): number {
+  const cached = serializedObjectSizes.get(objects);
+  if (cached !== undefined) return cached;
+  const size = JSON.stringify(objects).length * 2;
+  serializedObjectSizes.set(objects, size);
+  return size;
+}
+
+function historySize(history: CanvasSnapshot[]): number {
+  const uniqueObjects = new Set<SerializedCanvasData>();
+  let totalBytes = 0;
+  history.forEach((snapshot) => {
+    totalBytes += snapshotSettingsJson(snapshot).length * 2;
+    uniqueObjects.add(snapshot.objects);
+  });
+  uniqueObjects.forEach((objects) => {
+    totalBytes += serializedObjectsSize(objects);
+  });
+  return totalBytes;
+}
+
 function trimHistory(history: CanvasSnapshot[]): CanvasSnapshot[] {
-  const sizes = history.map((snapshot) => JSON.stringify(snapshot).length * 2);
-  let totalBytes = sizes.reduce((sum, size) => sum + size, 0);
   while (
     history.length > 1
-    && (history.length > MAX_HISTORY || totalBytes > MAX_HISTORY_BYTES)
+    && (history.length > MAX_HISTORY || historySize(history) > MAX_HISTORY_BYTES)
   ) {
     history.shift();
-    totalBytes -= sizes.shift() ?? 0;
   }
   return history;
 }
 
-function captureSnapshot(state: EditorStore): CanvasSnapshot | null {
+function captureSnapshot(
+  state: EditorStore,
+  reusableObjects?: SerializedCanvasData,
+): CanvasSnapshot | null {
   if (!state.canvas) return null;
-  return serializeCanvasSnapshot({
+  const input = {
     canvas: state.canvas,
     canvasWidth: state.canvasWidth,
     canvasHeight: state.canvasHeight,
@@ -166,13 +206,53 @@ function captureSnapshot(state: EditorStore): CanvasSnapshot | null {
     guides: state.guides,
     snapToGuides: state.snapToGuides,
     orthoMode: state.orthoMode,
-  });
+  };
+  const snapshot = reusableObjects
+    ? createCanvasSnapshot(input, reusableObjects)
+    : serializeCanvasSnapshot(input);
+  if (!reusableObjects) serializedObjectsSize(snapshot.objects);
+  return snapshot;
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => {
-  const recordSettingChange = (): void => {
-    get().pushHistory();
+  const recordHistoryChange = (change: HistoryChange): void => {
+    const state = get();
+    if (
+      !state.canvas
+      || state._skipHistoryPush
+      || historyService.isHistorySuspended
+    ) {
+      return;
+    }
+    if (transactionDepth > 0) {
+      if (change === 'objects' || transactionChange === null) {
+        transactionChange = change;
+      }
+      return;
+    }
+
+    // A settings-only entry can share the current immutable-by-convention
+    // serialized payload. The live Fabric objects have not changed, so another
+    // full canvas.toObject() traversal would only reproduce the same data.
+    const reusableObjects = change === 'settings'
+      ? state.history[state.historyIndex]?.objects
+      : undefined;
+    const snapshot = captureSnapshot(state, reusableObjects);
+    if (!snapshot) return;
+    const current = state.history[state.historyIndex];
+    if (current && snapshotsEqual(current, snapshot)) return;
+
+    const history = state.history.slice(0, state.historyIndex + 1);
+    history.push(snapshot);
+    trimHistory(history);
+    set({
+      history,
+      historyIndex: history.length - 1,
+      revision: state.revision + 1,
+    });
   };
+
+  const recordSettingChange = (): void => recordHistoryChange('settings');
 
   const applySnapshotSettings = (snapshot: CanvasSnapshot): void => {
     const state = get();
@@ -206,10 +286,13 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     canvas: fabric.Canvas,
     snapshot: CanvasSnapshot,
     signal: AbortSignal,
+    restoreObjects: boolean,
   ): Promise<void> => {
     await historyService.withHistorySuspended(async () => {
       applySnapshotSettings(snapshot);
-      await restoreCanvasObjects(canvas, snapshot.objects, signal);
+      if (restoreObjects) {
+        await restoreCanvasObjects(canvas, snapshot.objects, signal);
+      }
       configureCanvasForTool(canvas, get().activeTool);
     });
   };
@@ -229,6 +312,10 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     const previousSnapshot = history[previousIndex];
     const targetSnapshot = history[targetIndex];
     if (!previousSnapshot || !targetSnapshot) return;
+    // Object identity is shared only by settings-only history entries. A
+    // forced restore still reloads the payload because an open gesture may
+    // have mutated the live canvas without committing a new snapshot.
+    const restoreObjects = force || previousSnapshot.objects !== targetSnapshot.objects;
 
     const requestId = ++historyRequestId;
     set({ historyIndex: targetIndex });
@@ -236,19 +323,26 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     try {
       const result = await historyService.enqueue(async (signal) => {
         try {
-          await applyHistorySnapshot(canvas, targetSnapshot, signal);
+          await applyHistorySnapshot(canvas, targetSnapshot, signal, restoreObjects);
         } catch (error) {
           // A genuine load failure can leave Fabric partially mutated. Restore
           // the last known-good snapshot before surfacing the error.
           if (!signal.aborted) {
-            await applyHistorySnapshot(canvas, previousSnapshot, signal);
+            await applyHistorySnapshot(canvas, previousSnapshot, signal, restoreObjects);
           }
           throw error;
         }
       });
-      if (result.status === 'completed') {
-        set((state) => ({ revision: state.revision + 1 }));
+      if (result.status === 'skipped') {
+        // Document restores invalidate queued history work. If that document
+        // restore later fails and rolls the live canvas back, this request is
+        // still responsible for undoing its optimistic index update.
+        if (requestId === historyRequestId) {
+          set({ historyIndex: previousIndex });
+        }
+        return;
       }
+      set((state) => ({ revision: state.revision + 1 }));
     } catch {
       if (requestId === historyRequestId) {
         set({ historyIndex: previousIndex });
@@ -340,40 +434,14 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     isRestoring: false,
     revision: 0,
     _skipHistoryPush: false,
-    pushHistory: () => {
-      const state = get();
-      if (
-        !state.canvas
-        || state._skipHistoryPush
-        || historyService.isHistorySuspended
-      ) {
-        return;
-      }
-      if (transactionDepth > 0) {
-        transactionDirty = true;
-        return;
-      }
-
-      const snapshot = captureSnapshot(state);
-      if (!snapshot) return;
-      const current = state.history[state.historyIndex];
-      if (current && snapshotsEqual(current, snapshot)) return;
-
-      const history = state.history.slice(0, state.historyIndex + 1);
-      history.push(snapshot);
-      trimHistory(history);
-      set({
-        history,
-        historyIndex: history.length - 1,
-        revision: state.revision + 1,
-      });
-    },
+    pushHistory: () => recordHistoryChange('objects'),
     resetHistory: (initialSnapshot) => {
       historyRequestId += 1;
       historyService.invalidate();
       transactionDepth = 0;
-      transactionDirty = false;
+      transactionChange = null;
       const snapshot = initialSnapshot ?? captureSnapshot(get());
+      if (snapshot) serializedObjectsSize(snapshot.objects);
       set((state) => ({
         history: snapshot ? [snapshot] : [],
         historyIndex: snapshot ? 0 : -1,
@@ -388,7 +456,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
         // cancel that gesture back to the current baseline instead of skipping
         // over the baseline to an older history entry.
         transactionDepth = 0;
-        transactionDirty = false;
+        transactionChange = null;
         return restoreHistoryIndex(get().historyIndex, true);
       }
       return restoreHistoryIndex(get().historyIndex - 1);
@@ -396,7 +464,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     redo: () => {
       if (transactionDepth > 0) {
         transactionDepth = 0;
-        transactionDirty = false;
+        transactionChange = null;
         return restoreHistoryIndex(get().historyIndex, true);
       }
       return restoreHistoryIndex(get().historyIndex + 1);
@@ -407,14 +475,15 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     endHistoryTransaction: () => {
       if (transactionDepth === 0) return;
       transactionDepth -= 1;
-      if (transactionDepth === 0 && transactionDirty) {
-        transactionDirty = false;
-        get().pushHistory();
+      if (transactionDepth === 0 && transactionChange) {
+        const change = transactionChange;
+        transactionChange = null;
+        recordHistoryChange(change);
       }
     },
     cancelHistoryTransaction: () => {
       transactionDepth = 0;
-      transactionDirty = false;
+      transactionChange = null;
     },
     restoreEditorSettings: (snapshot) => applySnapshotSettings(snapshot),
 

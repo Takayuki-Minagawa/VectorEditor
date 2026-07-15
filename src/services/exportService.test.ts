@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   calculateCadPageGeometry,
   calculateIllustrationGeometry,
+  calculateVisibleBounds,
   isClipboardExportSupported,
   normalizeExportFileName,
 } from './exportService';
+import type * as fabric from 'fabric';
 
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 
@@ -18,6 +20,30 @@ afterEach(() => {
 });
 
 describe('export geometry', () => {
+  it('calculates bounds for 100,000 visible objects without argument spreading', () => {
+    function* createRectangles(): IterableIterator<fabric.FabricObject> {
+      for (let index = 0; index < 100_000; index += 1) {
+        yield {
+          visible: true,
+          excludeFromExport: false,
+          getBoundingRect: () => ({
+            left: index,
+            top: -index,
+            width: 2,
+            height: 3,
+          }),
+        } as unknown as fabric.FabricObject;
+      }
+    }
+
+    expect(calculateVisibleBounds(createRectangles())).toEqual({
+      left: 0,
+      top: -99_999,
+      width: 100_001,
+      height: 100_002,
+    });
+  });
+
   it('uses stable document coordinates for illustration output', () => {
     const geometry = calculateIllustrationGeometry(
       { left: 10, top: 20, width: 800, height: 600 },

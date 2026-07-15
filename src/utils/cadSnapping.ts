@@ -277,9 +277,26 @@ export function resolveSemanticAnchor(
   anchor: SemanticAnchor,
   objects: readonly fabric.FabricObject[],
 ): { x: number; y: number } {
+  const objectIndex = new Map<string, fabric.FabricObject>();
+  collectFabricObjectTree(objects).forEach((object) => {
+    const id = objectIdOf(object);
+    if (id) objectIndex.set(id, object);
+  });
+  return resolveSemanticAnchorFromIndex(anchor, objectIndex);
+}
+
+/**
+ * Resolve an associative anchor against an index built by the caller.
+ *
+ * Batch semantic refreshes use this entry point so resolving D dimensions or
+ * connectors does not repeatedly scan the same N-object Fabric tree.
+ */
+export function resolveSemanticAnchorFromIndex(
+  anchor: SemanticAnchor,
+  objectIndex: ReadonlyMap<string, fabric.FabricObject>,
+): { x: number; y: number } {
   if (!anchor.objectId || !anchor.anchor) return { x: anchor.x, y: anchor.y };
-  const object = collectFabricObjectTree(objects)
-    .find((candidate) => objectIdOf(candidate) === anchor.objectId);
+  const object = objectIndex.get(anchor.objectId);
   if (!object) return { x: anchor.x, y: anchor.y };
   const match = getObjectSnapGeometry(object).candidates.find((candidate) =>
     candidate.anchor === anchor.anchor
