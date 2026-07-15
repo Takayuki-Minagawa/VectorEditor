@@ -6,6 +6,8 @@
  * boundaries and clockwise for holes.
  */
 
+import { pointsCoincide } from './sectionGeometryPredicates';
+
 export const SECTION_PROFILE_VERSION = 1 as const;
 export const SECTION_LENGTH_UNIT = 'mm' as const;
 
@@ -26,6 +28,13 @@ export interface SectionProfileData {
   rings: SectionRing[];
   analysisToleranceMm: number;
   approximate: boolean;
+}
+
+export interface SectionBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
 }
 
 export interface SectionProperties {
@@ -104,16 +113,6 @@ function isFinitePoint(value: unknown): value is SectionPoint {
     && Number.isFinite(value.y);
 }
 
-function pointEqualityTolerance(a: SectionPoint, b: SectionPoint): number {
-  const coordinateScale = Math.max(1, Math.abs(a.x), Math.abs(a.y), Math.abs(b.x), Math.abs(b.y));
-  return coordinateScale * Number.EPSILON * 16;
-}
-
-function pointsCoincide(a: SectionPoint, b: SectionPoint): boolean {
-  const tolerance = pointEqualityTolerance(a, b);
-  return Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance;
-}
-
 /**
  * Removes redundant adjacent/closing points without changing the represented
  * polygon. This accepts both GeoJSON-style explicitly closed rings and the
@@ -135,7 +134,8 @@ export function canonicalizeSectionRingPoints(points: readonly SectionPoint[]): 
   return result;
 }
 
-class CompensatedSum {
+/** Neumaier compensated sum for geometry integrations and area comparisons. */
+export class CompensatedSum {
   private sum = 0;
   private correction = 0;
 
@@ -150,6 +150,80 @@ class CompensatedSum {
   value(): number {
     return this.sum + this.correction;
   }
+}
+
+export function sectionPointBounds(points: readonly SectionPoint[]): SectionBounds {
+  if (points.length === 0) {
+    throw new SectionValidationError([{
+      code: 'too-few-points',
+      message: 'Section bounds require at least one point.',
+    }]);
+  }
+
+  const bounds: SectionBounds = {
+    minX: Number.POSITIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+  };
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      throw new SectionValidationError([{
+        code: 'non-finite-point',
+        message: 'Section bounds require finite point coordinates.',
+      }]);
+    }
+    bounds.minX = Math.min(bounds.minX, point.x);
+    bounds.minY = Math.min(bounds.minY, point.y);
+    bounds.maxX = Math.max(bounds.maxX, point.x);
+    bounds.maxY = Math.max(bounds.maxY, point.y);
+  }
+  return bounds;
+}
+
+/**
+ * Computes bounds for one or more profiles. A role filter is useful for
+ * extreme-fibre calculations, where only material outer boundaries count.
+ */
+export function sectionProfileBounds(
+  value: SectionProfileData | readonly SectionProfileData[],
+  role?: SectionRingRole,
+): SectionBounds {
+  const profiles = (Array.isArray(value) ? value : [value]) as readonly SectionProfileData[];
+  const bounds: SectionBounds = {
+    minX: Number.POSITIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+  };
+  let hasPoints = false;
+  for (const profile of profiles) {
+    for (const ring of profile.rings) {
+      if (role && ring.role !== role) continue;
+      if (ring.points.length === 0) continue;
+      const ringBounds = sectionPointBounds(ring.points);
+      bounds.minX = Math.min(bounds.minX, ringBounds.minX);
+      bounds.minY = Math.min(bounds.minY, ringBounds.minY);
+      bounds.maxX = Math.max(bounds.maxX, ringBounds.maxX);
+      bounds.maxY = Math.max(bounds.maxY, ringBounds.maxY);
+      hasPoints = true;
+    }
+  }
+  if (!hasPoints) {
+    throw new SectionValidationError([{
+      code: 'too-few-points',
+      message: 'Section bounds require at least one point.',
+    }]);
+  }
+  return bounds;
+}
+
+/** Overflow-safe centre of finite section bounds. */
+export function sectionBoundsCentre(bounds: SectionBounds): SectionPoint {
+  return {
+    x: bounds.minX / 2 + bounds.maxX / 2,
+    y: bounds.minY / 2 + bounds.maxY / 2,
+  };
 }
 
 /** Signed polygon area; positive is counter-clockwise in x-right/y-up space. */
@@ -172,18 +246,9 @@ export function signedSectionRingArea(points: readonly SectionPoint[]): number {
 }
 
 function ringAreaEpsilon(points: readonly SectionPoint[]): number {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  for (const point of points) {
-    minX = Math.min(minX, point.x);
-    minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
-  }
-  const width = maxX - minX;
-  const height = maxY - minY;
+  const bounds = sectionPointBounds(points);
+  const width = bounds.maxX - bounds.minX;
+  const height = bounds.maxY - bounds.minY;
   const scale = Math.max(1, width, height);
   return scale * scale * Number.EPSILON * Math.max(64, points.length * 8);
 }

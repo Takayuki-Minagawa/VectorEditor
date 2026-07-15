@@ -1,6 +1,7 @@
 import * as fabric from 'fabric';
 import { PX_PER_MM } from '../types';
 import type { DrawingMode } from '../types';
+import { FABRIC_CUSTOM_PROPERTIES } from '../utils/fabricObjectMetadata';
 import { exportObjectsToDxf } from './dxfExporter';
 
 export type ExportFormat = 'svg' | 'png' | 'pdf' | 'dxf';
@@ -90,13 +91,6 @@ interface SerializedCanvas {
   [key: string]: unknown;
 }
 
-const FABRIC_EXPORT_PROPS = [
-  'id',
-  'name',
-  'objectKind',
-  'sectionProfileData',
-  'latexSource',
-];
 const MAX_RASTER_SIDE = 32_767;
 const MAX_RASTER_AREA = 100_000_000;
 const MIME_BY_FORMAT: Record<ExportFormat, string> = {
@@ -113,7 +107,7 @@ function assertPositiveFinite(value: number, name: string): void {
 }
 
 function cloneSerializedCanvas(canvas: fabric.Canvas, scope: ExportScope): SerializedCanvas {
-  const serialized = canvas.toObject(FABRIC_EXPORT_PROPS) as unknown as SerializedCanvas;
+  const serialized = canvas.toObject([...FABRIC_CUSTOM_PROPERTIES]) as unknown as SerializedCanvas;
   const exportableObjects = canvas.getObjects().filter((object) => !object.excludeFromExport);
 
   if (scope === 'selection') {

@@ -155,6 +155,31 @@ describe('useSectionAnalysis', () => {
     expect(result.current.analysis?.properties.area).toBe(20_000);
   });
 
+  it('keeps an active Worker when a parent rerenders with the same scoped revision', () => {
+    const profile = largeProfile();
+    const harness = workerHarness();
+    const { rerender } = renderHook(
+      ({ unrelatedRevision }) => {
+        void unrelatedRevision;
+        return useSectionAnalysis(profile, 7, {
+          debounceMs: 10,
+          workerFactory: harness.factory,
+        });
+      },
+      { initialProps: { unrelatedRevision: 1 } },
+    );
+
+    act(() => vi.advanceTimersByTime(10));
+    const worker = harness.workers[0];
+
+    rerender({ unrelatedRevision: 2 });
+    act(() => vi.advanceTimersByTime(10));
+
+    expect(harness.factory).toHaveBeenCalledTimes(1);
+    expect(worker.requests).toHaveLength(1);
+    expect(worker.terminate).not.toHaveBeenCalled();
+  });
+
   it('falls back after the debounce when Worker is unavailable', () => {
     const profile = largeProfile();
     const { result } = renderHook(() => useSectionAnalysis(profile, 1, {

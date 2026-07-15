@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SectionProfileData, SectionProperties } from '../domain/section';
 import { useI18n } from '../i18n/useI18n';
 import { useEditorStore } from '../store/useEditorStore';
+import { setFabricMetadataValues } from '../utils/fabricObjectMetadata';
 import SectionPropertiesPanel from './SectionPropertiesPanel';
 
 const analysisMocks = vi.hoisted(() => ({
@@ -101,10 +102,10 @@ describe('SectionPropertiesPanel analysis scheduling', () => {
   beforeEach(() => {
     analysisMocks.readProfile.mockReset().mockReturnValue(PROFILE);
     analysisMocks.calculateProperties.mockReset().mockReturnValue(PROPERTIES);
-    useEditorStore.setState({ historyIndex: 0 });
+    useEditorStore.setState({ historyIndex: 0, revision: 0 });
   });
 
-  it('does not recalculate during transforms and refreshes once after object:modified', () => {
+  it('ignores unrelated commits and refreshes once after this section transform is committed', () => {
     const harness = createCanvasHarness();
     const section = new fabric.Path('M 0 0 L 100 0 L 100 50 L 0 50 Z');
     const other = new fabric.Rect({ width: 10, height: 10 });
@@ -118,14 +119,24 @@ describe('SectionPropertiesPanel analysis scheduling', () => {
       harness.fire('object:scaling', { target: section });
       harness.fire('object:rotating', { target: section });
       harness.fire('object:modified', { target: other });
+      useEditorStore.setState({ revision: 1 });
     });
 
     expect(analysisMocks.readProfile).toHaveBeenCalledTimes(1);
     expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(1);
 
     act(() => {
+      section.set({ fill: '#ff0000' });
+      useEditorStore.setState({ revision: 2 });
+    });
+
+    expect(analysisMocks.readProfile).toHaveBeenCalledTimes(1);
+    expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      section.set({ left: (section.left ?? 0) + 25 });
       harness.fire('object:modified', { target: section });
-      useEditorStore.setState({ historyIndex: 1 });
+      useEditorStore.setState({ revision: 3 });
     });
 
     expect(analysisMocks.readProfile).toHaveBeenCalledTimes(2);
@@ -147,8 +158,9 @@ describe('SectionPropertiesPanel analysis scheduling', () => {
     expect(harness.context.arc).toHaveBeenCalledTimes(1);
 
     act(() => {
+      section.set({ left: (section.left ?? 0) + 25 });
       harness.fire('object:modified', { target: section });
-      useEditorStore.setState({ historyIndex: 1 });
+      useEditorStore.setState({ revision: 1 });
     });
     act(() => harness.fire('after:render'));
 
@@ -171,22 +183,62 @@ describe('SectionPropertiesPanel analysis scheduling', () => {
     expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(1);
   });
 
-  it('reanalyses on commit and Undo/Redo history changes without depending on locale', () => {
+  it('stays current across transform commits, Undo/Redo, selection replacement and locale changes', () => {
     const harness = createCanvasHarness();
     const section = new fabric.Path('M 0 0 L 100 0 L 100 50 L 0 50 Z');
+    const initialLeft = section.left;
     const view = render(<SectionPropertiesPanel canvas={harness.canvas} object={section} />);
 
-    act(() => useEditorStore.setState({ historyIndex: 1 }));
+    // An unrelated document commit wakes the lightweight input check without
+    // running profile normalisation or property integration again.
+    act(() => useEditorStore.setState({ revision: 1 }));
+    expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      section.set({ left: (initialLeft ?? 0) + 20 });
+      useEditorStore.setState({ revision: 2 });
+    });
     expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(2);
 
-    act(() => useEditorStore.setState({ historyIndex: 0 }));
+    act(() => {
+      section.set({ left: initialLeft });
+      useEditorStore.setState({ revision: 3 });
+    });
     expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(3);
+
+    // Undo/Redo and document imports replace Fabric instances. A newly
+    // selected replacement must not inherit the previous object's cache.
+    const restoredSection = new fabric.Path('M 0 0 L 100 0 L 100 50 L 0 50 Z', {
+      left: (initialLeft ?? 0) + 40,
+    });
+    view.rerender(<SectionPropertiesPanel canvas={harness.canvas} object={restoredSection} />);
+    expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(4);
 
     const previousLanguage = useI18n.getState().lang;
     act(() => useI18n.getState().setLang(previousLanguage === 'ja' ? 'en' : 'ja'));
-    view.rerender(<SectionPropertiesPanel canvas={harness.canvas} object={section} />);
+    view.rerender(<SectionPropertiesPanel canvas={harness.canvas} object={restoredSection} />);
 
-    expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(3);
+    expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(4);
     act(() => useI18n.getState().setLang(previousLanguage));
+  });
+
+  it('invalidates a section when its profile metadata is replaced', () => {
+    const harness = createCanvasHarness();
+    const section = new fabric.Path('M 0 0 L 100 0 L 100 50 L 0 50 Z');
+    setFabricMetadataValues(section, {
+      objectKind: 'sectionProfile',
+      sectionProfileData: PROFILE,
+    });
+    render(<SectionPropertiesPanel canvas={harness.canvas} object={section} />);
+
+    expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(1);
+
+    setFabricMetadataValues(section, {
+      sectionProfileData: { ...PROFILE, analysisToleranceMm: 0.02 },
+    });
+    act(() => useEditorStore.setState({ revision: 1 }));
+
+    expect(analysisMocks.readProfile).toHaveBeenCalledTimes(2);
+    expect(analysisMocks.calculateProperties).toHaveBeenCalledTimes(2);
   });
 });

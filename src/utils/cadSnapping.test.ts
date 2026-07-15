@@ -7,6 +7,7 @@ import {
   snapCandidateToAnchor,
 } from './cadSnapping';
 import { setFabricMetadataValues } from './fabricObjectMetadata';
+import { createSectionPath } from './sectionShapeFactory';
 
 describe('CAD object snapping', () => {
   it('finds line endpoints and midpoints in document coordinates', () => {
@@ -68,5 +69,155 @@ describe('CAD object snapping', () => {
     const expected = child.getCenterPoint();
     expect(resolved.x).toBeCloseTo(expected.x);
     expect(resolved.y).toBeCloseTo(expected.y);
+  });
+
+  it('snaps to the actual vertices and edges of a non-rectangular section profile', () => {
+    const section = createSectionPath({
+      version: 1,
+      rings: [{
+        role: 'outer',
+        points: [
+          { x: 10, y: -10 },
+          { x: 10, y: -50 },
+          { x: 30, y: -50 },
+          { x: 30, y: -30 },
+          { x: 50, y: -30 },
+          { x: 50, y: -10 },
+        ],
+      }, {
+        role: 'hole',
+        points: [
+          { x: 15, y: -15 },
+          { x: 25, y: -15 },
+          { x: 25, y: -25 },
+          { x: 15, y: -25 },
+        ],
+      }],
+      analysisToleranceMm: 0.01,
+      approximate: false,
+    }, { id: 'l-section', strokeWidth: 0 });
+
+    const geometry = getObjectSnapGeometry(section);
+
+    expect(geometry.segments).toHaveLength(10);
+    expect(geometry.candidates).toContainEqual(expect.objectContaining({
+      point: { x: 30, y: 30 },
+      kind: 'endpoint',
+      objectId: 'l-section',
+      anchor: 'vertex',
+      vertexIndex: 3,
+    }));
+    expect(geometry.candidates).toContainEqual(expect.objectContaining({
+      point: { x: 15, y: 15 },
+      kind: 'endpoint',
+      anchor: 'vertex',
+      vertexIndex: 6,
+    }));
+    expect(geometry.candidates).toContainEqual(expect.objectContaining({
+      point: { x: 40, y: 30 },
+      kind: 'midpoint',
+    }));
+    expect(findCadSnap([section], { x: 30.4, y: 30.4 }, 1)).toMatchObject({
+      point: { x: 30, y: 30 },
+      kind: 'endpoint',
+      objectId: 'l-section',
+    });
+
+    const anchor = snapCandidateToAnchor(
+      geometry.candidates.find((candidate) => candidate.vertexIndex === 3)!,
+    );
+    section.set({ left: section.left + 100, top: section.top + 50 });
+    section.setCoords();
+
+    expect(resolveSemanticAnchor(anchor, [section])).toEqual({ x: 130, y: 80 });
+  });
+
+  it('falls back for an invalid section transform without stopping other object snaps', () => {
+    const invalidSection = createSectionPath({
+      version: 1,
+      rings: [{
+        role: 'outer',
+        points: [
+          { x: 300, y: -300 },
+          { x: 300, y: -340 },
+          { x: 340, y: -340 },
+          { x: 340, y: -300 },
+        ],
+      }],
+      analysisToleranceMm: 0.01,
+      approximate: false,
+    }, { strokeWidth: 0 });
+    invalidSection.set({ scaleX: 1e-20 });
+    invalidSection.setCoords();
+    const line = new fabric.Line([10, 20, 110, 20]);
+    setFabricMetadataValues(line, { id: 'valid-line', objectKind: 'line' });
+
+    expect(findCadSnap(
+      [invalidSection, line],
+      { x: 10.5, y: 20 },
+      1,
+    )).toMatchObject({
+      point: { x: 10, y: 20 },
+      kind: 'endpoint',
+      objectId: 'valid-line',
+    });
+  });
+
+  it.each(['flipX', 'flipY'] as const)(
+    'keeps a saved section vertex anchor on the same physical point after %s',
+    (flip) => {
+      const section = createSectionPath({
+        version: 1,
+        rings: [{
+          role: 'outer',
+          points: [
+            { x: 10, y: -10 },
+            { x: 10, y: -50 },
+            { x: 30, y: -60 },
+            { x: 60, y: -35 },
+            { x: 50, y: -10 },
+          ],
+        }],
+        analysisToleranceMm: 0.01,
+        approximate: false,
+      }, { id: 'flipped-section', strokeWidth: 0 });
+      const original = getObjectSnapGeometry(section).candidates.find(
+        (candidate) => candidate.anchor === 'vertex' && candidate.vertexIndex === 0,
+      )!;
+      const anchor = snapCandidateToAnchor(original);
+      const center = section.getCenterPoint();
+      const expected = flip === 'flipX'
+        ? { x: 2 * center.x - original.point.x, y: original.point.y }
+        : { x: original.point.x, y: 2 * center.y - original.point.y };
+
+      section.set(flip === 'flipX' ? { flipX: true } : { flipY: true });
+      section.setCoords();
+
+      const resolved = resolveSemanticAnchor(anchor, [section]);
+      expect(resolved.x).toBeCloseTo(expected.x);
+      expect(resolved.y).toBeCloseTo(expected.y);
+    },
+  );
+
+  it('does not hide unexpected section geometry failures', () => {
+    const section = createSectionPath({
+      version: 1,
+      rings: [{
+        role: 'outer',
+        points: [
+          { x: 0, y: 0 },
+          { x: 0, y: 20 },
+          { x: 20, y: 20 },
+          { x: 20, y: 0 },
+        ],
+      }],
+      analysisToleranceMm: 0.01,
+      approximate: false,
+    });
+    section.calcTransformMatrix = () => {
+      throw new Error('unexpected transform failure');
+    };
+
+    expect(() => getObjectSnapGeometry(section)).toThrow('unexpected transform failure');
   });
 });

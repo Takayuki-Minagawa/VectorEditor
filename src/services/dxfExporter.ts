@@ -1,5 +1,8 @@
 import * as fabric from 'fabric';
-import { readSectionProfileInDocumentCoordinates } from '../utils/sectionGeometry';
+import {
+  readSectionProfileInDocumentCoordinates,
+  SectionGeometryError,
+} from '../utils/sectionGeometry';
 import { getFabricMetadata } from '../utils/fabricObjectMetadata';
 
 export interface DxfExportResult {
@@ -189,7 +192,14 @@ export function exportObjectsToDxf(
 
     const metadata = getFabricMetadata(object);
     if (metadata.objectKind === 'sectionProfile' && metadata.sectionProfileData) {
-      const profile = readSectionProfileInDocumentCoordinates(object);
+      let profile: ReturnType<typeof readSectionProfileInDocumentCoordinates>;
+      try {
+        profile = readSectionProfileInDocumentCoordinates(object);
+      } catch (error: unknown) {
+        if (!(error instanceof SectionGeometryError)) throw error;
+        unsupported.add('SectionProfile');
+        return;
+      }
       profile.rings.forEach((ring) => {
         addPolyline(
           entities,

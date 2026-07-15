@@ -175,4 +175,36 @@ describe('R12 ASCII DXF export', () => {
       'SectionProfileHoles',
     ]);
   });
+
+  it('skips an invalid transformed section while continuing to export other objects', () => {
+    const section = new fabric.Rect({
+      width: 40,
+      height: 20,
+      scaleX: 1e-20,
+    });
+    setFabricMetadataValues(section, {
+      objectKind: 'sectionProfile',
+      sectionProfileData: {
+        version: 1,
+        analysisToleranceMm: 0.01,
+        approximate: false,
+        rings: [{
+          role: 'outer',
+          points: [
+            { x: -20, y: -10 },
+            { x: 20, y: -10 },
+            { x: 20, y: 10 },
+            { x: -20, y: 10 },
+          ],
+        }],
+      },
+    });
+    const line = new fabric.Line([10, 20, 40, 50]);
+
+    const result = exportObjectsToDxf([section, line], 300, 200);
+
+    expect(result.text).toMatch(/0\r\nLINE\r\n/);
+    expect(result.text).not.toMatch(/0\r\nPOLYLINE\r\n/);
+    expect(result.unsupportedTypes).toEqual(['SectionProfile']);
+  });
 });

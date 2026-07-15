@@ -5,6 +5,7 @@ import { calculateSectionProperties } from './sectionProperties';
 import {
   fabricObjectsToSectionProfile,
   readSectionProfileInDocumentCoordinates,
+  readSectionProfileRingsInDocumentCoordinates,
   sectionProfileFromFabricObject,
   SectionGeometryError,
 } from './sectionGeometry';
@@ -141,6 +142,32 @@ describe('sectionGeometry', () => {
     expect(viaGeneralConverter.rings).toEqual(read.rings);
     expect(read.analysisToleranceMm).toBeCloseTo(0.03, 12);
     expect(viaGeneralConverter.analysisToleranceMm).toBeCloseTo(0.03, 12);
+  });
+
+  it('preserves point identity for reflected snap rings while analysis stays canonical', () => {
+    const path = createSectionPath({
+      version: 1,
+      rings: [{
+        role: 'outer',
+        points: [
+          { x: 10, y: -10 },
+          { x: 10, y: -50 },
+          { x: 30, y: -60 },
+          { x: 60, y: -35 },
+          { x: 50, y: -10 },
+        ],
+      }],
+      analysisToleranceMm: 0.01,
+      approximate: false,
+    }, { strokeWidth: 0 });
+    path.set({ flipX: true });
+
+    const orderedRings = readSectionProfileRingsInDocumentCoordinates(path);
+    const analysisProfile = readSectionProfileInDocumentCoordinates(path);
+
+    expect(signedSectionRingArea(orderedRings[0].points)).toBeLessThan(0);
+    expect(signedSectionRingArea(analysisProfile.rings[0].points)).toBeGreaterThan(0);
+    expect(analysisProfile.rings[0].points).toEqual([...orderedRings[0].points].reverse());
   });
 
   it.each([

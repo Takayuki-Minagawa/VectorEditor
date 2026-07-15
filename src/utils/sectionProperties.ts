@@ -1,35 +1,13 @@
 import {
+  CompensatedSum,
   SectionValidationError,
-  normalizeSectionProfileData,
+  sectionBoundsCentre,
+  sectionProfileBounds,
   type SectionPoint,
   type SectionProfileData,
   type SectionProperties,
 } from '../domain/section';
-import { assertValidSectionProfileTopology } from './sectionTopology';
-
-class CompensatedSum {
-  private sum = 0;
-  private correction = 0;
-
-  add(value: number): void {
-    const next = this.sum + value;
-    this.correction += Math.abs(this.sum) >= Math.abs(value)
-      ? (this.sum - next) + value
-      : (value - next) + this.sum;
-    this.sum = next;
-  }
-
-  value(): number {
-    return this.sum + this.correction;
-  }
-}
-
-interface SectionBounds {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
+import { normalizeAndAssertValidSectionProfileTopology } from './sectionTopology';
 
 interface IntegralAccumulator {
   twiceArea: CompensatedSum;
@@ -56,34 +34,6 @@ function createAccumulator(): IntegralAccumulator {
     ixTimesTwelve: new CompensatedSum(),
     iyTimesTwelve: new CompensatedSum(),
     ixyTimesTwentyFour: new CompensatedSum(),
-  };
-}
-
-function getOuterBounds(profile: SectionProfileData): SectionBounds {
-  const bounds: SectionBounds = {
-    minX: Number.POSITIVE_INFINITY,
-    minY: Number.POSITIVE_INFINITY,
-    maxX: Number.NEGATIVE_INFINITY,
-    maxY: Number.NEGATIVE_INFINITY,
-  };
-
-  for (const ring of profile.rings) {
-    if (ring.role !== 'outer') continue;
-    for (const point of ring.points) {
-      bounds.minX = Math.min(bounds.minX, point.x);
-      bounds.minY = Math.min(bounds.minY, point.y);
-      bounds.maxX = Math.max(bounds.maxX, point.x);
-      bounds.maxY = Math.max(bounds.maxY, point.y);
-    }
-  }
-  return bounds;
-}
-
-function boundsCentre(bounds: SectionBounds): SectionPoint {
-  // Halving first avoids overflow when both bounds are close to MAX_VALUE.
-  return {
-    x: bounds.minX / 2 + bounds.maxX / 2,
-    y: bounds.minY / 2 + bounds.maxY / 2,
   };
 }
 
@@ -183,10 +133,9 @@ function clampNumericalZero(value: number, reference: number): number {
  * input winding is accepted and canonicalised before integration.
  */
 export function calculateSectionProperties(input: SectionProfileData): SectionProperties {
-  const profile = normalizeSectionProfileData(input);
-  assertValidSectionProfileTopology(profile);
-  const bounds = getOuterBounds(profile);
-  const reference = boundsCentre(bounds);
+  const profile = normalizeAndAssertValidSectionProfileTopology(input);
+  const bounds = sectionProfileBounds(profile, 'outer');
+  const reference = sectionBoundsCentre(bounds);
   if (!Number.isFinite(reference.x) || !Number.isFinite(reference.y)) {
     throw createCalculationIssue('Section coordinate range is too large to analyse safely.');
   }

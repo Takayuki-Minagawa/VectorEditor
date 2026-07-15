@@ -2,6 +2,10 @@ import * as fabric from 'fabric';
 import type { ObjectAnchorKind, SemanticAnchor } from './fabricObjectMetadata';
 import { getFabricMetadata } from './fabricObjectMetadata';
 import { collectFabricObjectTree } from './fabricObjectTree';
+import {
+  readSectionProfileRingsInDocumentCoordinates,
+  SectionGeometryError,
+} from './sectionGeometry';
 
 export type CadSnapKind = 'endpoint' | 'midpoint' | 'center' | 'intersection';
 
@@ -145,12 +149,49 @@ function boxGeometry(object: fabric.FabricObject): ObjectSnapGeometry {
   return { candidates, segments };
 }
 
+function sectionProfileGeometry(object: fabric.FabricObject): ObjectSnapGeometry {
+  const rings = readSectionProfileRingsInDocumentCoordinates(object);
+  const candidates: CadSnapCandidate[] = [];
+  const segments: Segment[] = [];
+  let vertexOffset = 0;
+
+  rings.forEach((ring) => {
+    const points = ring.points.map((point) => ({ x: point.x, y: -point.y }));
+    points.forEach((point, index) => {
+      addCandidate(candidates, object, point, 'endpoint', 'vertex', vertexOffset + index);
+      const end = points[(index + 1) % points.length];
+      if (!end) return;
+      segments.push({ start: point, end, object });
+      addCandidate(
+        candidates,
+        object,
+        midpoint(point, end),
+        'midpoint',
+        'midpoint',
+        vertexOffset + index,
+      );
+    });
+    vertexOffset += points.length;
+  });
+
+  addCandidate(candidates, object, object.getCenterPoint(), 'center', 'center');
+  return { candidates, segments };
+}
+
 export function getObjectSnapGeometry(object: fabric.FabricObject): ObjectSnapGeometry {
+  const metadata = getFabricMetadata(object);
+  if (metadata.objectKind === 'sectionProfile' && metadata.sectionProfileData) {
+    try {
+      return sectionProfileGeometry(object);
+    } catch (error: unknown) {
+      if (!(error instanceof SectionGeometryError)) throw error;
+      return boxGeometry(object);
+    }
+  }
   if (object instanceof fabric.Line) return lineGeometry(object);
   if (object instanceof fabric.Polygon) return polyGeometry(object, true);
   if (object instanceof fabric.Polyline) return polyGeometry(object, false);
 
-  const metadata = getFabricMetadata(object);
   if (metadata.objectKind === 'dimension' && metadata.dimensionData) {
     const { start, end } = metadata.dimensionData;
     const candidates: CadSnapCandidate[] = [];

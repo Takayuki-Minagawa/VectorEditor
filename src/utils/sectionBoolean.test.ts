@@ -108,6 +108,33 @@ describe('section Boolean operations', () => {
     }));
   });
 
+  it('treats point/edge contact as no area overlap but retains a small real cut', () => {
+    expect(() => differenceSectionProfiles(
+      rectangle(0, 0, 10, 10),
+      rectangle(10, 2, 12, 8),
+    )).toThrowError(expect.objectContaining<Partial<SectionBooleanError>>({
+      code: 'no-intersection',
+    }));
+
+    const result = differenceSectionProfiles(
+      rectangle(0, 0, 10, 10),
+      rectangle(9.999999, 2, 12, 8),
+    );
+    expect(area(result)).toBeCloseTo(100 - 0.000001 * 6, 9);
+  });
+
+  it('detects cutters located entirely in an existing void as no overlap', () => {
+    const subject = rectangle(0, 0, 20, 20);
+    subject.rings.push({
+      role: 'hole',
+      points: rectangle(5, 5, 15, 15).rings[0].points.slice().reverse(),
+    });
+    expect(() => differenceSectionProfiles(subject, rectangle(7, 7, 13, 13)))
+      .toThrowError(expect.objectContaining<Partial<SectionBooleanError>>({
+        code: 'no-intersection',
+      }));
+  });
+
   it('reports an empty result when all section material is removed', () => {
     expect(() => differenceSectionProfiles(
       rectangle(0, 0, 10, 10),

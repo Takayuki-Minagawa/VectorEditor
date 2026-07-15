@@ -6,6 +6,15 @@ import {
   type SectionProfileData,
   type SectionRing,
 } from '../domain/section';
+import {
+  linearEpsilon,
+  orientation,
+  orientationEpsilon,
+  pointDistanceSquared,
+  pointsCoincide,
+  segmentsIntersect,
+  vectorLength,
+} from '../domain/sectionGeometryPredicates';
 import { getFabricMetadata } from './fabricObjectMetadata';
 
 export const DEFAULT_SECTION_TOLERANCE_MM = 0.01;
@@ -13,7 +22,6 @@ export const DEFAULT_SECTION_TOLERANCE_MM = 0.01;
 const MAX_CURVE_SUBDIVISION_DEPTH = 24;
 const MAX_CURVE_VERTICES = 65_536;
 const MATRIX_EPSILON = 1e-12;
-const FLOAT_COMPARISON_FACTOR = 32;
 
 export type SectionGeometryErrorCode =
   | 'empty-selection'
@@ -105,99 +113,6 @@ function maxLinearScale(matrix: fabric.TMat2D): number {
   const determinant = a * d - b * c;
   const discriminant = Math.max(0, sumSquares * sumSquares - 4 * determinant * determinant);
   return Math.sqrt(Math.max(0, (sumSquares + Math.sqrt(discriminant)) / 2));
-}
-
-function pointDistanceSquared(first: SectionPoint, second: SectionPoint): number {
-  const dx = first.x - second.x;
-  const dy = first.y - second.y;
-  return dx * dx + dy * dy;
-}
-
-function coordinateScale(points: readonly SectionPoint[]): number {
-  let scale = 1;
-  for (const point of points) {
-    scale = Math.max(scale, Math.abs(point.x), Math.abs(point.y));
-  }
-  return scale;
-}
-
-function vectorLength(first: SectionPoint, second: SectionPoint): number {
-  return Math.hypot(second.x - first.x, second.y - first.y);
-}
-
-/** Length-dimensional uncertainty: coordinate ULP plus local edge arithmetic. */
-function linearEpsilon(
-  points: readonly SectionPoint[],
-  localLength = 1,
-): number {
-  return (
-    coordinateScale(points)
-    + Math.max(1, localLength)
-  ) * Number.EPSILON * FLOAT_COMPARISON_FACTOR;
-}
-
-function pointsCoincide(first: SectionPoint, second: SectionPoint): boolean {
-  const epsilon = linearEpsilon([first, second], vectorLength(first, second));
-  return pointDistanceSquared(first, second) <= epsilon * epsilon;
-}
-
-function orientation(first: SectionPoint, second: SectionPoint, third: SectionPoint): number {
-  return (second.x - first.x) * (third.y - first.y)
-    - (second.y - first.y) * (third.x - first.x);
-}
-
-/** Area-dimensional uncertainty for a cross product of local edge vectors. */
-function orientationEpsilon(
-  first: SectionPoint,
-  second: SectionPoint,
-  third: SectionPoint,
-): number {
-  const firstLength = vectorLength(first, second);
-  const secondLength = vectorLength(first, third);
-  const localLength = Math.max(1, firstLength, secondLength);
-  const coordinateUncertainty = linearEpsilon([first, second, third], localLength);
-  return (firstLength + secondLength + localLength) * coordinateUncertainty
-    + localLength * localLength * Number.EPSILON * FLOAT_COMPARISON_FACTOR;
-}
-
-function pointOnSegment(point: SectionPoint, first: SectionPoint, second: SectionPoint): boolean {
-  const edgeLength = vectorLength(first, second);
-  const distanceToPoint = vectorLength(first, point);
-  const crossEpsilon = orientationEpsilon(first, second, point);
-  if (Math.abs(orientation(first, second, point)) > crossEpsilon) return false;
-  const boundsEpsilon = linearEpsilon(
-    [point, first, second],
-    Math.max(edgeLength, distanceToPoint),
-  );
-  return point.x >= Math.min(first.x, second.x) - boundsEpsilon
-    && point.x <= Math.max(first.x, second.x) + boundsEpsilon
-    && point.y >= Math.min(first.y, second.y) - boundsEpsilon
-    && point.y <= Math.max(first.y, second.y) + boundsEpsilon;
-}
-
-function segmentsIntersect(
-  firstStart: SectionPoint,
-  firstEnd: SectionPoint,
-  secondStart: SectionPoint,
-  secondEnd: SectionPoint,
-): boolean {
-  const o1 = orientation(firstStart, firstEnd, secondStart);
-  const o2 = orientation(firstStart, firstEnd, secondEnd);
-  const o3 = orientation(secondStart, secondEnd, firstStart);
-  const o4 = orientation(secondStart, secondEnd, firstEnd);
-  const epsilon1 = orientationEpsilon(firstStart, firstEnd, secondStart);
-  const epsilon2 = orientationEpsilon(firstStart, firstEnd, secondEnd);
-  const epsilon3 = orientationEpsilon(secondStart, secondEnd, firstStart);
-  const epsilon4 = orientationEpsilon(secondStart, secondEnd, firstEnd);
-
-  if (((o1 > epsilon1 && o2 < -epsilon2) || (o1 < -epsilon1 && o2 > epsilon2))
-      && ((o3 > epsilon3 && o4 < -epsilon4) || (o3 < -epsilon3 && o4 > epsilon4))) {
-    return true;
-  }
-  return (Math.abs(o1) <= epsilon1 && pointOnSegment(secondStart, firstStart, firstEnd))
-    || (Math.abs(o2) <= epsilon2 && pointOnSegment(secondEnd, firstStart, firstEnd))
-    || (Math.abs(o3) <= epsilon3 && pointOnSegment(firstStart, secondStart, secondEnd))
-    || (Math.abs(o4) <= epsilon4 && pointOnSegment(firstEnd, secondStart, secondEnd));
 }
 
 interface RingSegment {
@@ -455,6 +370,32 @@ export function transformSectionProfile(
     }
   });
   return transformed;
+}
+
+/**
+ * Reads section rings in document coordinates without reordering their points.
+ *
+ * Reflected Fabric transforms reverse the rings' winding. Keeping the original
+ * local point order here gives OSNAP vertices stable indices across flipX/flipY;
+ * callers that need canonical winding should use
+ * readSectionProfileInDocumentCoordinates instead.
+ */
+export function readSectionProfileRingsInDocumentCoordinates(
+  object: fabric.FabricObject,
+): SectionRing[] {
+  const localProfile = readLocalProfileMetadata(object);
+  if (!localProfile) {
+    throw new SectionGeometryError(
+      'invalid-section-profile',
+      'The selected object is not a metadata-backed section profile.',
+    );
+  }
+  const matrix = object.calcTransformMatrix();
+  assertUsableMatrix(matrix);
+  return localProfile.rings.map((ring) => ({
+    role: ring.role,
+    points: ring.points.map((point) => transformEngineeringPoint(point, matrix)),
+  }));
 }
 
 /** Reads local section metadata and bakes the object's complete Fabric transform. */

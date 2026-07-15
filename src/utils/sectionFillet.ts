@@ -4,7 +4,7 @@ import {
   type SectionProfileData,
   type SectionRing,
 } from '../domain/section';
-import { assertValidSectionProfileTopology } from './sectionTopology';
+import { assertValidNormalizedSectionProfileTopology } from './sectionTopology';
 
 const MAX_FILLET_SEGMENTS = 4096;
 const APPROXIMATE_PROFILE_MESSAGE =
@@ -362,7 +362,7 @@ export function filletSectionProfileConvexCorners(
       rings,
       approximate: true,
     });
-    assertValidSectionProfileTopology(result);
+    assertValidNormalizedSectionProfileTopology(result);
     return result;
   } catch (error) {
     throw new SectionFilletError(

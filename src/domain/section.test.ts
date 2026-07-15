@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CompensatedSum,
   SectionValidationError,
   assertValidSectionProfileData,
   normalizeSectionProfileData,
+  sectionBoundsCentre,
+  sectionProfileBounds,
   signedSectionRingArea,
   validateSectionProfileData,
   type SectionProfileData,
@@ -113,5 +116,41 @@ describe('section domain validation', () => {
       }],
     };
     expect(validateSectionProfileData(profile).valid).toBe(true);
+  });
+
+  it('computes shared single/multi-profile bounds with an outer-role filter', () => {
+    const hole = {
+      role: 'hole' as const,
+      points: [
+        { x: -100, y: -100 },
+        { x: -90, y: -100 },
+        { x: -90, y: -90 },
+      ],
+    };
+    const second: SectionProfileData = {
+      ...validProfile,
+      rings: [{
+        role: 'outer',
+        points: [
+          { x: 20, y: 10 },
+          { x: 30, y: 10 },
+          { x: 30, y: 15 },
+        ],
+      }],
+    };
+
+    expect(sectionProfileBounds({ ...validProfile, rings: [...validProfile.rings, hole] }, 'outer'))
+      .toEqual({ minX: 0, minY: 0, maxX: 10, maxY: 5 });
+    const combined = sectionProfileBounds([validProfile, second]);
+    expect(combined).toEqual({ minX: 0, minY: 0, maxX: 30, maxY: 15 });
+    expect(sectionBoundsCentre(combined)).toEqual({ x: 15, y: 7.5 });
+  });
+
+  it('exposes compensated summation for shared area and inertia aggregation', () => {
+    const sum = new CompensatedSum();
+    sum.add(1e16);
+    sum.add(1);
+    sum.add(-1e16);
+    expect(sum.value()).toBe(1);
   });
 });

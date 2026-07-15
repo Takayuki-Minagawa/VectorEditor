@@ -1,14 +1,21 @@
 import polygonClipping from 'polygon-clipping';
 import type { MultiPolygon, Pair, Ring } from 'polygon-clipping';
 import {
+  CompensatedSum,
   normalizeSectionProfileData,
+  sectionBoundsCentre,
+  sectionProfileBounds,
   signedSectionRingArea,
   type SectionPoint,
   type SectionProfileData,
   type SectionRing,
 } from '../domain/section';
+import { locatePointInRing, segmentsIntersect } from '../domain/sectionGeometryPredicates';
 
-const FLOAT_COMPARISON_FACTOR = 32;
+const MAX_TOPOLOGY_CACHE_ENTRIES = 32;
+const MAX_TOPOLOGY_CACHE_KEY_CHARACTERS = 4_000_000;
+const validTopologyKeys = new Map<string, number>();
+let validTopologyKeyCharacters = 0;
 
 export class SectionTopologyError extends Error {
   constructor(message: string) {
@@ -26,76 +33,6 @@ interface Segment {
   maxX: number;
   minY: number;
   maxY: number;
-}
-
-type PointLocation = 'outside' | 'inside' | 'boundary';
-
-function vectorLength(first: SectionPoint, second: SectionPoint): number {
-  return Math.hypot(second.x - first.x, second.y - first.y);
-}
-
-function coordinateScale(points: readonly SectionPoint[]): number {
-  let scale = 1;
-  for (const point of points) scale = Math.max(scale, Math.abs(point.x), Math.abs(point.y));
-  return scale;
-}
-
-function linearEpsilon(points: readonly SectionPoint[], localLength = 1): number {
-  return (coordinateScale(points) + Math.max(1, localLength))
-    * Number.EPSILON * FLOAT_COMPARISON_FACTOR;
-}
-
-function orientation(first: SectionPoint, second: SectionPoint, third: SectionPoint): number {
-  return (second.x - first.x) * (third.y - first.y)
-    - (second.y - first.y) * (third.x - first.x);
-}
-
-function orientationEpsilon(
-  first: SectionPoint,
-  second: SectionPoint,
-  third: SectionPoint,
-): number {
-  const firstLength = vectorLength(first, second);
-  const secondLength = vectorLength(first, third);
-  const localLength = Math.max(1, firstLength, secondLength);
-  const coordinateUncertainty = linearEpsilon([first, second, third], localLength);
-  return (firstLength + secondLength + localLength) * coordinateUncertainty
-    + localLength * localLength * Number.EPSILON * FLOAT_COMPARISON_FACTOR;
-}
-
-function pointOnSegment(point: SectionPoint, start: SectionPoint, end: SectionPoint): boolean {
-  const edgeLength = vectorLength(start, end);
-  const pointLength = vectorLength(start, point);
-  if (Math.abs(orientation(start, end, point)) > orientationEpsilon(start, end, point)) return false;
-  const epsilon = linearEpsilon([point, start, end], Math.max(edgeLength, pointLength));
-  return point.x >= Math.min(start.x, end.x) - epsilon
-    && point.x <= Math.max(start.x, end.x) + epsilon
-    && point.y >= Math.min(start.y, end.y) - epsilon
-    && point.y <= Math.max(start.y, end.y) + epsilon;
-}
-
-function segmentsIntersect(
-  firstStart: SectionPoint,
-  firstEnd: SectionPoint,
-  secondStart: SectionPoint,
-  secondEnd: SectionPoint,
-): boolean {
-  const o1 = orientation(firstStart, firstEnd, secondStart);
-  const o2 = orientation(firstStart, firstEnd, secondEnd);
-  const o3 = orientation(secondStart, secondEnd, firstStart);
-  const o4 = orientation(secondStart, secondEnd, firstEnd);
-  const e1 = orientationEpsilon(firstStart, firstEnd, secondStart);
-  const e2 = orientationEpsilon(firstStart, firstEnd, secondEnd);
-  const e3 = orientationEpsilon(secondStart, secondEnd, firstStart);
-  const e4 = orientationEpsilon(secondStart, secondEnd, firstEnd);
-  if (((o1 > e1 && o2 < -e2) || (o1 < -e1 && o2 > e2))
-      && ((o3 > e3 && o4 < -e4) || (o3 < -e3 && o4 > e4))) {
-    return true;
-  }
-  return (Math.abs(o1) <= e1 && pointOnSegment(secondStart, firstStart, firstEnd))
-    || (Math.abs(o2) <= e2 && pointOnSegment(secondEnd, firstStart, firstEnd))
-    || (Math.abs(o3) <= e3 && pointOnSegment(firstStart, secondStart, secondEnd))
-    || (Math.abs(o4) <= e4 && pointOnSegment(firstEnd, secondStart, secondEnd));
 }
 
 function ringSegments(points: readonly SectionPoint[], source: number): Segment[] {
@@ -150,39 +87,6 @@ function ringBoundariesIntersect(
   return false;
 }
 
-function locatePointInRing(point: SectionPoint, ring: readonly SectionPoint[]): PointLocation {
-  let inside = false;
-  for (
-    let index = 0, previousIndex = ring.length - 1;
-    index < ring.length;
-    previousIndex = index, index += 1
-  ) {
-    const current = ring[index];
-    const previous = ring[previousIndex];
-    if (pointOnSegment(point, previous, current)) return 'boundary';
-    const crossesVertically = (current.y > point.y) !== (previous.y > point.y);
-    const crossesRay = crossesVertically
-      && point.x - current.x < ((previous.x - current.x) * (point.y - current.y))
-        / (previous.y - current.y);
-    if (crossesRay) inside = !inside;
-  }
-  return inside ? 'inside' : 'outside';
-}
-
-function profileTranslation(profile: SectionProfileData): SectionPoint {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  profile.rings.forEach((ring) => ring.points.forEach((point) => {
-    minX = Math.min(minX, point.x);
-    minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
-  }));
-  return { x: minX / 2 + maxX / 2, y: minY / 2 + maxY / 2 };
-}
-
 function translateRing(ring: SectionRing, translation: SectionPoint): Ring {
   return [
     ...ring.points.map((point): Pair => [
@@ -197,13 +101,42 @@ function translateRing(ring: SectionRing, translation: SectionPoint): Ring {
 }
 
 function multiPolygonArea(value: MultiPolygon): number {
-  let area = 0;
+  const area = new CompensatedSum();
   value.forEach((polygon) => polygon.forEach((ring, ringIndex) => {
     const points = ring.map(([x, y]) => ({ x, y }));
     const ringArea = Math.abs(signedSectionRingArea(points));
-    area += ringIndex === 0 ? ringArea : -ringArea;
+    area.add(ringIndex === 0 ? ringArea : -ringArea);
   }));
-  return area;
+  return area.value();
+}
+
+function topologyCacheKey(profile: SectionProfileData): string {
+  // Full normalized content is the key. Unlike a WeakMap keyed by a mutable
+  // profile object, in-place point edits necessarily produce a different key.
+  return JSON.stringify(profile);
+}
+
+function hasCachedTopology(key: string): boolean {
+  const size = validTopologyKeys.get(key);
+  if (size === undefined) return false;
+  validTopologyKeys.delete(key);
+  validTopologyKeys.set(key, size);
+  return true;
+}
+
+function rememberValidTopology(key: string): void {
+  if (key.length > MAX_TOPOLOGY_CACHE_KEY_CHARACTERS) return;
+  validTopologyKeys.set(key, key.length);
+  validTopologyKeyCharacters += key.length;
+  while (
+    validTopologyKeys.size > MAX_TOPOLOGY_CACHE_ENTRIES
+    || validTopologyKeyCharacters > MAX_TOPOLOGY_CACHE_KEY_CHARACTERS
+  ) {
+    const oldest = validTopologyKeys.entries().next().value as [string, number] | undefined;
+    if (!oldest) break;
+    validTopologyKeys.delete(oldest[0]);
+    validTopologyKeyCharacters -= oldest[1];
+  }
 }
 
 /**
@@ -211,8 +144,10 @@ function multiPolygonArea(value: MultiPolygon): number {
  * simple boundaries, hole containment, and non-overlapping material/void
  * regions. Point/line contact between separate material outers is allowed.
  */
-export function assertValidSectionProfileTopology(value: SectionProfileData): void {
-  const profile = normalizeSectionProfileData(value);
+export function assertValidNormalizedSectionProfileTopology(profile: SectionProfileData): void {
+  const cacheKey = topologyCacheKey(profile);
+  if (hasCachedTopology(cacheKey)) return;
+
   profile.rings.forEach((ring, ringIndex) => {
     if (ringHasSelfIntersection(ring.points)) {
       throw new SectionTopologyError(`Section ring ${ringIndex} is self-intersecting.`);
@@ -237,7 +172,7 @@ export function assertValidSectionProfileTopology(value: SectionProfileData): vo
     holesByOuter.get(containers[0])?.push(hole);
   }
 
-  const translation = profileTranslation(profile);
+  const translation = sectionBoundsCentre(sectionProfileBounds(profile));
   const geometry: MultiPolygon = outers.map((outer) => [
     translateRing(outer, translation),
     ...(holesByOuter.get(outer) ?? []).map((hole) => translateRing(hole, translation)),
@@ -251,14 +186,15 @@ export function assertValidSectionProfileTopology(value: SectionProfileData): vo
     );
   }
 
-  const signedInputArea = profile.rings.reduce(
-    (sum, ring) => sum + signedSectionRingArea(ring.points),
-    0,
-  );
-  const absoluteInputArea = profile.rings.reduce(
-    (sum, ring) => sum + Math.abs(signedSectionRingArea(ring.points)),
-    0,
-  );
+  const signedInputAreaSum = new CompensatedSum();
+  const absoluteInputAreaSum = new CompensatedSum();
+  profile.rings.forEach((ring) => {
+    const ringArea = signedSectionRingArea(ring.points);
+    signedInputAreaSum.add(ringArea);
+    absoluteInputAreaSum.add(Math.abs(ringArea));
+  });
+  const signedInputArea = signedInputAreaSum.value();
+  const absoluteInputArea = absoluteInputAreaSum.value();
   const normalizedArea = multiPolygonArea(normalized);
   const areaTolerance = Math.max(
     profile.analysisToleranceMm ** 2,
@@ -270,4 +206,18 @@ export function assertValidSectionProfileTopology(value: SectionProfileData): vo
   ) {
     throw new SectionTopologyError('Section outer or hole rings overlap or have inconsistent topology.');
   }
+  rememberValidTopology(cacheKey);
+}
+
+/** Normalizes exactly once, validates topology, and returns the analyzed copy. */
+export function normalizeAndAssertValidSectionProfileTopology(
+  value: SectionProfileData,
+): SectionProfileData {
+  const profile = normalizeSectionProfileData(value);
+  assertValidNormalizedSectionProfileTopology(profile);
+  return profile;
+}
+
+export function assertValidSectionProfileTopology(value: SectionProfileData): void {
+  void normalizeAndAssertValidSectionProfileTopology(value);
 }

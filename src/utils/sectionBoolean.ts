@@ -1,12 +1,15 @@
 import polygonClipping from 'polygon-clipping';
 import type { MultiPolygon, Pair, Ring } from 'polygon-clipping';
 import {
+  CompensatedSum,
   normalizeSectionProfileData,
+  sectionBoundsCentre,
+  sectionProfileBounds,
   signedSectionRingArea,
-  type SectionPoint,
   type SectionProfileData,
   type SectionRing,
 } from '../domain/section';
+import { pointInRing } from '../domain/sectionGeometryPredicates';
 
 export type SectionBooleanErrorCode =
   | 'empty-input'
@@ -29,8 +32,6 @@ interface Translation {
   y: number;
 }
 
-const FLOAT_COMPARISON_FACTOR = 32;
-
 function normalizeInput(profile: SectionProfileData): SectionProfileData {
   try {
     return normalizeSectionProfileData(profile);
@@ -42,78 +43,8 @@ function normalizeInput(profile: SectionProfileData): SectionProfileData {
   }
 }
 
-function ringBoundsArea(points: readonly SectionPoint[]): number {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  points.forEach((point) => {
-    minX = Math.min(minX, point.x);
-    minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
-  });
-  return (maxX - minX) * (maxY - minY);
-}
-
-function pointOnSegment(point: SectionPoint, start: SectionPoint, end: SectionPoint): boolean {
-  const edgeX = end.x - start.x;
-  const edgeY = end.y - start.y;
-  const pointX = point.x - start.x;
-  const pointY = point.y - start.y;
-  const edgeLength = Math.hypot(edgeX, edgeY);
-  const pointLength = Math.hypot(pointX, pointY);
-  const localLength = Math.max(1, edgeLength, pointLength);
-  const coordinateScale = Math.max(
-    1,
-    Math.abs(point.x),
-    Math.abs(point.y),
-    Math.abs(start.x),
-    Math.abs(start.y),
-    Math.abs(end.x),
-    Math.abs(end.y),
-  );
-  const linearEpsilon = (coordinateScale + localLength)
-    * Number.EPSILON * FLOAT_COMPARISON_FACTOR;
-  const crossEpsilon = (edgeLength + pointLength + localLength) * linearEpsilon
-    + localLength * localLength * Number.EPSILON * FLOAT_COMPARISON_FACTOR;
-  const cross = edgeX * pointY - edgeY * pointX;
-  return Math.abs(cross) <= crossEpsilon
-    && point.x >= Math.min(start.x, end.x) - linearEpsilon
-    && point.x <= Math.max(start.x, end.x) + linearEpsilon
-    && point.y >= Math.min(start.y, end.y) - linearEpsilon
-    && point.y <= Math.max(start.y, end.y) + linearEpsilon;
-}
-
-function pointInRing(point: SectionPoint, ring: readonly SectionPoint[]): boolean {
-  let inside = false;
-  for (let index = 0, previousIndex = ring.length - 1; index < ring.length; previousIndex = index, index += 1) {
-    const current = ring[index];
-    const previous = ring[previousIndex];
-    if (pointOnSegment(point, previous, current)) return true;
-    const crossesVertically = (current.y > point.y) !== (previous.y > point.y);
-    // Compare offsets from the current vertex so a large document origin is
-    // not added back into the ray intersection calculation.
-    const crossesRay = crossesVertically
-      && point.x - current.x < ((previous.x - current.x) * (point.y - current.y))
-        / (previous.y - current.y);
-    if (crossesRay) inside = !inside;
-  }
-  return inside;
-}
-
 function profileTranslation(profiles: readonly SectionProfileData[]): Translation {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  profiles.forEach((profile) => profile.rings.forEach((ring) => ring.points.forEach((point) => {
-    minX = Math.min(minX, point.x);
-    minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
-  })));
-  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  return sectionBoundsCentre(sectionProfileBounds(profiles));
 }
 
 function profileToMultiPolygon(
@@ -131,7 +62,7 @@ function profileToMultiPolygon(
   for (const hole of profile.rings.filter((ring) => ring.role === 'hole')) {
     const representative = hole.points[0];
     const containingOuters = outers
-      .filter(({ ring }) => pointInRing(representative, ring.points))
+      .filter(({ ring }) => pointInRing(representative, ring.points, 'include'))
       .sort((first, second) => first.area - second.area);
     if (containingOuters.length === 0) {
       throw new SectionBooleanError(
@@ -153,13 +84,13 @@ function profileToMultiPolygon(
 }
 
 function multiPolygonArea(multiPolygon: MultiPolygon): number {
-  let total = 0;
+  const total = new CompensatedSum();
   multiPolygon.forEach((polygon) => polygon.forEach((ring, ringIndex) => {
     const points = ring.map(([x, y]) => ({ x, y }));
     const area = Math.abs(signedSectionRingArea(points));
-    total += ringIndex === 0 ? area : -area;
+    total.add(ringIndex === 0 ? area : -area);
   }));
-  return total;
+  return total.value();
 }
 
 function resultToProfile(
@@ -265,11 +196,9 @@ export function differenceSectionProfiles(
   const subjectGeometry = profileToMultiPolygon(subject, translation);
   const cutterGeometries = cutters.map((profile) => profileToMultiPolygon(profile, translation));
   let combinedCutter: MultiPolygon;
-  let overlap: MultiPolygon;
   let result: MultiPolygon;
   try {
     combinedCutter = polygonClipping.union(cutterGeometries[0], ...cutterGeometries.slice(1));
-    overlap = polygonClipping.intersection(subjectGeometry, combinedCutter);
     result = polygonClipping.difference(subjectGeometry, combinedCutter);
   } catch (error) {
     throw new SectionBooleanError(
@@ -279,14 +208,16 @@ export function differenceSectionProfiles(
   }
 
   const toleranceMm = Math.max(...allProfiles.map((profile) => profile.analysisToleranceMm));
-  const subjectBoundsArea = subject.rings
-    .filter((ring) => ring.role === 'outer')
-    .reduce((sum, ring) => sum + ringBoundsArea(ring.points), 0);
-  const overlapEpsilon = Math.max(
-    toleranceMm * toleranceMm * Number.EPSILON,
-    subjectBoundsArea * Number.EPSILON * 64,
-  );
-  if (overlap.length === 0 || multiPolygonArea(overlap) <= overlapEpsilon) {
+  const subjectArea = multiPolygonArea(subjectGeometry);
+  const resultArea = multiPolygonArea(result);
+  const removedArea = subjectArea - resultArea;
+  // The Boolean kernel has already quantised all geometry in its translated
+  // frame. This threshold covers only floating-point accumulation error; it
+  // deliberately does not suppress a real overlap smaller than the UI's curve
+  // approximation tolerance.
+  const comparisonScale = Math.max(1, Math.abs(subjectArea), Math.abs(resultArea));
+  const overlapEpsilon = comparisonScale * Number.EPSILON * 256;
+  if (!Number.isFinite(removedArea) || removedArea <= overlapEpsilon) {
     throw new SectionBooleanError(
       'no-intersection',
       'The cutter does not overlap the section material.',

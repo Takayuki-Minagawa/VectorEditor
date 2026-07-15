@@ -7,6 +7,7 @@ import {
 } from '../hooks/useSectionAnalysis';
 import { useI18n } from '../i18n/useI18n';
 import { useEditorStore } from '../store/useEditorStore';
+import { getFabricMetadata } from '../utils/fabricObjectMetadata';
 import { readSectionProfileInDocumentCoordinates } from '../utils/sectionGeometry';
 
 interface SectionPropertiesPanelProps {
@@ -15,6 +16,80 @@ interface SectionPropertiesPanelProps {
 }
 
 type DisplayUnit = 'mm' | 'cm';
+
+interface SectionAnalysisInput {
+  objectKind: string | undefined;
+  profileData: SectionProfileData | undefined;
+  transform: fabric.TMat2D;
+}
+
+interface PreparedSectionProfile {
+  profile: SectionProfileData | null;
+  error: string | null;
+  revision: number;
+}
+
+interface SectionAnalysisCacheEntry {
+  input: SectionAnalysisInput;
+  prepared: PreparedSectionProfile;
+}
+
+const sectionAnalysisCache = new WeakMap<fabric.FabricObject, SectionAnalysisCacheEntry>();
+let nextSectionAnalysisRevision = 0;
+
+function captureSectionAnalysisInput(object: fabric.FabricObject): SectionAnalysisInput {
+  const metadata = getFabricMetadata(object);
+  return {
+    objectKind: metadata.objectKind,
+    profileData: metadata.sectionProfileData,
+    // Fabric may reuse its internal matrix cache, so retain an immutable copy
+    // for comparison with the next committed document revision.
+    transform: [...object.calcTransformMatrix()] as fabric.TMat2D,
+  };
+}
+
+function sameTransform(left: fabric.TMat2D, right: fabric.TMat2D): boolean {
+  return left.every((value, index) => Object.is(value, right[index]));
+}
+
+function sameSectionAnalysisInput(
+  left: SectionAnalysisInput,
+  right: SectionAnalysisInput,
+): boolean {
+  return left.objectKind === right.objectKind
+    && left.profileData === right.profileData
+    && sameTransform(left.transform, right.transform);
+}
+
+/**
+ * Normalisation and topology validation are deliberately cached per live
+ * Fabric object. Section commands and document restores replace immutable
+ * sectionProfileData/object instances, while ordinary move/scale operations
+ * are detected by the complete Fabric transform matrix.
+ */
+function prepareSectionProfile(object: fabric.FabricObject): PreparedSectionProfile {
+  const input = captureSectionAnalysisInput(object);
+  const cached = sectionAnalysisCache.get(object);
+  if (cached && sameSectionAnalysisInput(cached.input, input)) return cached.prepared;
+
+  nextSectionAnalysisRevision += 1;
+  let prepared: PreparedSectionProfile;
+  try {
+    prepared = {
+      profile: readSectionProfileInDocumentCoordinates(object),
+      error: null,
+      revision: nextSectionAnalysisRevision,
+    };
+  } catch (caught: unknown) {
+    prepared = {
+      profile: null,
+      error: caught instanceof Error ? caught.message : null,
+      revision: nextSectionAnalysisRevision,
+    };
+  }
+  sectionAnalysisCache.set(object, { input, prepared });
+  return prepared;
+}
 
 function displayValue(value: number, power: 1 | 2 | 3 | 4, unit: DisplayUnit): string {
   const factor = unit === 'mm' ? 1 : 0.1;
@@ -108,7 +183,7 @@ function drawSectionOverlay(
 
 export default function SectionPropertiesPanel({ canvas, object }: SectionPropertiesPanelProps) {
   const t = useI18n((state) => state.t);
-  const historyIndex = useEditorStore((state) => state.historyIndex);
+  const documentRevision = useEditorStore((state) => state.revision);
   const [unit, setUnit] = useState<DisplayUnit>('mm');
   const [showOverlay, setShowOverlay] = useState(true);
   const objectTransformingRef = useRef(false);
@@ -120,7 +195,7 @@ export default function SectionPropertiesPanel({ canvas, object }: SectionProper
     };
     const refreshAfterCommit = (event?: { target?: fabric.FabricObject }) => {
       if (event?.target !== object) return;
-      // pushHistory changes historyIndex synchronously in the Canvas listener.
+      // pushHistory advances the document revision synchronously in the Canvas listener.
       // Keep the stale overlay suppressed until React commits that analysis.
       objectTransformingRef.current = true;
     };
@@ -133,24 +208,18 @@ export default function SectionPropertiesPanel({ canvas, object }: SectionProper
     return () => disposers.forEach((dispose) => dispose());
   }, [canvas, object]);
 
-  const preparedProfile = useMemo((): {
-    profile: SectionProfileData | null;
-    error: string | null;
-  } => {
-    // Property fields, numeric movement, align/flip, and Undo/Redo do not all
-    // emit object:modified, but every committed geometry change moves the
-    // history cursor. Reading it here makes that cursor the analysis revision.
-    void historyIndex;
-    try {
-      return { profile: readSectionProfileInDocumentCoordinates(object), error: null };
-    } catch (caught: unknown) {
-      return {
-        profile: null,
-        error: caught instanceof Error ? caught.message : null,
-      };
-    }
-  }, [historyIndex, object]);
-  const analysisStatus = useSectionAnalysis(preparedProfile.profile, historyIndex);
+  const preparedProfile = useMemo(() => {
+    // Property fields, numeric movement, align/flip, Undo/Redo and document
+    // restores do not all emit object:modified. The global revision is only a
+    // lightweight observation point; prepareSectionProfile returns the same
+    // profile/revision when this particular section's inputs are unchanged.
+    void documentRevision;
+    return prepareSectionProfile(object);
+  }, [documentRevision, object]);
+  const analysisStatus = useSectionAnalysis(
+    preparedProfile.profile,
+    preparedProfile.revision,
+  );
   const analysis = preparedProfile.error ? null : analysisStatus.analysis;
   const analysisError = preparedProfile.error ?? analysisStatus.error;
 

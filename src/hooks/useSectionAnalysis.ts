@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { SectionProfileData, SectionProperties } from '../domain/section';
+import {
+  sectionProfileBounds,
+  type SectionProfileData,
+  type SectionProperties,
+} from '../domain/section';
 import { calculateSectionProperties } from '../utils/sectionProperties';
 import {
   isSectionAnalysisResponse,
@@ -55,19 +59,7 @@ function completeAnalysis(
   profile: SectionProfileData,
   properties: SectionProperties,
 ): SectionAnalysisState {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  profile.rings.forEach((ring) => {
-    if (ring.role !== 'outer') return;
-    ring.points.forEach((point) => {
-      minX = Math.min(minX, point.x);
-      minY = Math.min(minY, point.y);
-      maxX = Math.max(maxX, point.x);
-      maxY = Math.max(maxY, point.y);
-    });
-  });
+  const { minX, minY, maxX, maxY } = sectionProfileBounds(profile, 'outer');
   return { profile, properties, minX, minY, maxX, maxY };
 }
 
