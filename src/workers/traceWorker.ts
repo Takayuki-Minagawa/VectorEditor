@@ -48,13 +48,15 @@ export interface TracePipelineCallbacks {
   yieldControl?: () => Promise<void>;
 }
 
-export interface TraceCandidate {
+interface TraceCandidateBase {
   points: TracedPoint[];
-  holes?: TracedPoint[][];
   closed: boolean;
-  strokeWidth?: number;
-  source: 'contour' | 'centerline';
-  componentId?: number;
+  componentId: number;
+}
+
+export interface CenterlineTraceCandidate extends TraceCandidateBase {
+  source: 'centerline';
+  strokeWidth: number;
 }
 
 export interface SimplifiedTraceContour {
@@ -64,17 +66,37 @@ export interface SimplifiedTraceContour {
   area: number;
 }
 
-export interface OuterContourCandidate extends TraceCandidate {
+export interface OuterContourCandidate extends TraceCandidateBase {
   source: 'contour';
+  closed: true;
   componentId: number;
   area: number;
   holes: TracedPoint[][];
   holeAreas: number[];
 }
 
+export type TraceCandidate =
+  | CenterlineTraceCandidate
+  | OuterContourCandidate;
+
 const MIN_RAW_BOUNDARY_EDGES = 4_096;
 const MAX_RAW_BOUNDARY_EDGES = 500_000;
 const RAW_BOUNDARY_EDGE_SAFETY_FACTOR = 4;
+const OUTLINED_PRIMITIVE_THRESHOLDS = {
+  minNoiseTolerancePx: 1.5,
+  maxNoiseTolerancePx: 3,
+  centerDimensionRatio: 0.08,
+  strokeToleranceRatio: 0.35,
+  minHoleConvexity: 0.85,
+  rectMinFillRatio: 0.75,
+  rectEllipseErrorFloor: 0.28,
+  curvedEllipseErrorCeiling: 0.32,
+  circleMaxAspectRatio: 1.3,
+  orientationRelevantAspectRatio: 1.15,
+  maxOrientationErrorDeg: 12,
+  maxSimpleRectVertices: 4,
+  minCurvedVertices: 5,
+} as const;
 
 function rawBoundaryEdgeLimit(options: TraceOptions): number {
   return Math.min(
@@ -301,6 +323,9 @@ export function estimateOutlinedStrokeWidth(
   if (candidate.holes.length === 0) {
     return DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH;
   }
+  // Area comes from the pre-simplification pixel-edge contours, while the
+  // perimeter uses the simplified rings classified below. Aggressive
+  // simplification can shorten the perimeter and bias the 2A/P estimate up.
   const inkArea = candidate.area
     - candidate.holeAreas.reduce((total, area) => total + area, 0);
   const totalBoundaryLength = closedBoundaryLength(candidate.points)
@@ -436,15 +461,19 @@ function isCompatibleOutlinedPrimitive(
   const holeFeatures = computeShapeFeatures(hole);
   const outerGeometry = primitiveCenter(outer);
   const noiseTolerance = clamp(
-    Math.max(1.5, simplifyTolerance),
-    1.5,
-    3,
+    Math.max(
+      OUTLINED_PRIMITIVE_THRESHOLDS.minNoiseTolerancePx,
+      simplifyTolerance,
+    ),
+    OUTLINED_PRIMITIVE_THRESHOLDS.minNoiseTolerancePx,
+    OUTLINED_PRIMITIVE_THRESHOLDS.maxNoiseTolerancePx,
   );
   const centerTolerance = Math.max(
     noiseTolerance,
     Math.min(
-      outerGeometry.minimumDimension * 0.08,
-      strokeWidth * 0.35,
+      outerGeometry.minimumDimension
+        * OUTLINED_PRIMITIVE_THRESHOLDS.centerDimensionRatio,
+      strokeWidth * OUTLINED_PRIMITIVE_THRESHOLDS.strokeToleranceRatio,
     ),
   );
   if (Math.hypot(
@@ -453,23 +482,30 @@ function isCompatibleOutlinedPrimitive(
   ) > centerTolerance) {
     return false;
   }
-  const gapTolerance = Math.max(noiseTolerance, strokeWidth * 0.35);
+  const gapTolerance = Math.max(
+    noiseTolerance,
+    strokeWidth * OUTLINED_PRIMITIVE_THRESHOLDS.strokeToleranceRatio,
+  );
 
   if (outer.kind === 'rect') {
     // A true rectangular inset remains box-like. This rejects circular or
     // irregular cut-outs that happen to share the same bounding box.
     if (
-      holeFeatures.convexity < 0.85
-      || holeFeatures.fillRatio < 0.75
+      holeFeatures.convexity
+        < OUTLINED_PRIMITIVE_THRESHOLDS.minHoleConvexity
+      || holeFeatures.fillRatio
+        < OUTLINED_PRIMITIVE_THRESHOLDS.rectMinFillRatio
       || (
-        hole.length > 4
-        && holeFeatures.ellipseError < 0.28
+        hole.length > OUTLINED_PRIMITIVE_THRESHOLDS.maxSimpleRectVertices
+        && holeFeatures.ellipseError
+          < OUTLINED_PRIMITIVE_THRESHOLDS.rectEllipseErrorFloor
       )
     ) {
       return false;
     }
     const aligned = alignBoundsAxes(outer.angle, holeFeatures.orientedBounds);
-    return aligned.orientationError <= 12
+    return aligned.orientationError
+      <= OUTLINED_PRIMITIVE_THRESHOLDS.maxOrientationErrorDeg
       && uniformOutlineGap(
         outer.width,
         outer.height,
@@ -483,14 +519,21 @@ function isCompatibleOutlinedPrimitive(
   // Curved primitives need a convex ellipse-like inner boundary. Five points
   // are enough for a rasterized small circle while excluding a square hole.
   if (
-    hole.length < 5
-    || holeFeatures.convexity < 0.85
-    || holeFeatures.ellipseError > 0.32
+    hole.length < OUTLINED_PRIMITIVE_THRESHOLDS.minCurvedVertices
+    || holeFeatures.convexity
+      < OUTLINED_PRIMITIVE_THRESHOLDS.minHoleConvexity
+    || holeFeatures.ellipseError
+      > OUTLINED_PRIMITIVE_THRESHOLDS.curvedEllipseErrorCeiling
   ) {
     return false;
   }
   if (outer.kind === 'circle') {
-    if (holeFeatures.aspectRatio > 1.3) return false;
+    if (
+      holeFeatures.aspectRatio
+        > OUTLINED_PRIMITIVE_THRESHOLDS.circleMaxAspectRatio
+    ) {
+      return false;
+    }
     const innerRadius = Math.sqrt(holeFeatures.area / Math.PI);
     const gap = outer.r - innerRadius;
     return gap > 0 && Math.abs(gap - strokeWidth) <= gapTolerance;
@@ -499,9 +542,17 @@ function isCompatibleOutlinedPrimitive(
   const aligned = alignBoundsAxes(outer.angle, holeFeatures.orientedBounds);
   const outerAspectRatio = Math.max(outer.rx, outer.ry)
     / Math.min(outer.rx, outer.ry);
-  const requireOrientation = outerAspectRatio > 1.15
-    && holeFeatures.aspectRatio > 1.15;
-  return (!requireOrientation || aligned.orientationError <= 12)
+  const requireOrientation = (
+    outerAspectRatio
+      > OUTLINED_PRIMITIVE_THRESHOLDS.orientationRelevantAspectRatio
+    && holeFeatures.aspectRatio
+      > OUTLINED_PRIMITIVE_THRESHOLDS.orientationRelevantAspectRatio
+  );
+  return (
+    !requireOrientation
+      || aligned.orientationError
+        <= OUTLINED_PRIMITIVE_THRESHOLDS.maxOrientationErrorDeg
+  )
     && uniformOutlineGap(
       outer.rx * 2,
       outer.ry * 2,
@@ -566,12 +617,18 @@ function pointToSegmentDistance(
   );
 }
 
-function centerlineShape(candidate: TraceCandidate, options: TraceOptions): TracedShape {
+function centerlineShape(
+  candidate: CenterlineTraceCandidate,
+  options: TraceOptions,
+): TracedShape {
   const points = candidate.closed
     && !samePoint(candidate.points[0], candidate.points[candidate.points.length - 1])
     ? [...candidate.points, { ...candidate.points[0] }]
     : candidate.points;
-  const strokeWidth = Math.max(0.5, candidate.strokeWidth ?? 1);
+  const strokeWidth = Math.max(
+    MIN_TRACED_STROKE_WIDTH,
+    candidate.strokeWidth,
+  );
   if (options.mode === 'cleanup' && !candidate.closed && points.length >= 2) {
     const start = points[0];
     const end = points[points.length - 1];
@@ -754,7 +811,51 @@ function renderedRectBounds(
   };
 }
 
-function fitRectToImage(
+interface PrimitiveFitScale {
+  geometryScale: number;
+  strokeWidth: number;
+}
+
+function primitiveFitScale(
+  geometryWidth: number,
+  geometryHeight: number,
+  strokeWidth: number,
+  strokeWidthFactorX: number,
+  strokeWidthFactorY: number,
+  imageWidth: number,
+  imageHeight: number,
+): PrimitiveFitScale | null {
+  const proportionalScale = Math.min(
+    1,
+    imageWidth / Math.max(
+      Number.EPSILON,
+      geometryWidth + strokeWidth * strokeWidthFactorX,
+    ),
+    imageHeight / Math.max(
+      Number.EPSILON,
+      geometryHeight + strokeWidth * strokeWidthFactorY,
+    ),
+  );
+  const fittedStrokeWidth = Math.max(
+    MIN_TRACED_STROKE_WIDTH,
+    strokeWidth * proportionalScale,
+  );
+  const availableWidth = imageWidth
+    - fittedStrokeWidth * strokeWidthFactorX;
+  const availableHeight = imageHeight
+    - fittedStrokeWidth * strokeWidthFactorY;
+  if (availableWidth <= 0 || availableHeight <= 0) return null;
+  const geometryScale = Math.min(
+    1,
+    availableWidth / Math.max(Number.EPSILON, geometryWidth),
+    availableHeight / Math.max(Number.EPSILON, geometryHeight),
+  );
+  return Number.isFinite(geometryScale) && geometryScale > 0
+    ? { geometryScale, strokeWidth: fittedStrokeWidth }
+    : null;
+}
+
+export function fitRectToImage(
   shape: Extract<TracedShape, { kind: 'rect' }>,
   imageWidth: number,
   imageHeight: number,
@@ -772,34 +873,41 @@ function fitRectToImage(
     ...shape,
     strokeWidth: effectivePrimitiveStrokeWidth(shape),
   };
-  let bounds = renderedRectBounds(result);
-  const widthScale = imageWidth / Math.max(Number.EPSILON, bounds.maxX - bounds.minX);
-  const heightScale = imageHeight / Math.max(Number.EPSILON, bounds.maxY - bounds.minY);
-  const dimensionScale = Math.min(1, widthScale, heightScale);
-  if (dimensionScale < 1) {
-    const scaledStrokeWidth = result.strokeWidth * dimensionScale;
-    if (scaledStrokeWidth < MIN_TRACED_STROKE_WIDTH) return null;
-    const radians = result.angle * Math.PI / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
+  const radians = result.angle * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const absoluteCos = Math.abs(cos);
+  const absoluteSin = Math.abs(sin);
+  const strokeWidthFactor = absoluteCos + absoluteSin;
+  const fit = primitiveFitScale(
+    absoluteCos * result.width + absoluteSin * result.height,
+    absoluteSin * result.width + absoluteCos * result.height,
+    result.strokeWidth,
+    strokeWidthFactor,
+    strokeWidthFactor,
+    imageWidth,
+    imageHeight,
+  );
+  if (!fit) return null;
+  if (fit.geometryScale < 1 || fit.strokeWidth !== result.strokeWidth) {
     const centerX = result.x
       + cos * result.width / 2
       - sin * result.height / 2;
     const centerY = result.y
       + sin * result.width / 2
       + cos * result.height / 2;
-    const width = result.width * dimensionScale;
-    const height = result.height * dimensionScale;
+    const width = result.width * fit.geometryScale;
+    const height = result.height * fit.geometryScale;
     result = {
       ...result,
       x: centerX - cos * width / 2 + sin * height / 2,
       y: centerY - sin * width / 2 - cos * height / 2,
       width,
       height,
-      strokeWidth: scaledStrokeWidth,
+      strokeWidth: fit.strokeWidth,
     };
-    bounds = renderedRectBounds(result);
   }
+  const bounds = renderedRectBounds(result);
   const offsetX = bounds.minX < 0
     ? -bounds.minX
     : bounds.maxX > imageWidth
@@ -817,7 +925,7 @@ function fitRectToImage(
   };
 }
 
-function fitCircleToImage(
+export function fitCircleToImage(
   shape: Extract<TracedShape, { kind: 'circle' }>,
   imageWidth: number,
   imageHeight: number,
@@ -829,21 +937,18 @@ function fitCircleToImage(
     return null;
   }
   const strokeWidth = effectivePrimitiveStrokeWidth(shape);
-  const outerRadius = shape.r + strokeWidth / 2;
-  const radiusScale = Math.min(
+  const fit = primitiveFitScale(
+    shape.r * 2,
+    shape.r * 2,
+    strokeWidth,
     1,
-    imageWidth / Math.max(Number.EPSILON, outerRadius * 2),
-    imageHeight / Math.max(Number.EPSILON, outerRadius * 2),
+    1,
+    imageWidth,
+    imageHeight,
   );
-  const radius = shape.r * radiusScale;
-  const fittedStrokeWidth = strokeWidth * radiusScale;
-  const fittedOuterRadius = radius + fittedStrokeWidth / 2;
-  if (
-    radius <= 0
-    || fittedStrokeWidth < MIN_TRACED_STROKE_WIDTH
-  ) {
-    return null;
-  }
+  if (!fit) return null;
+  const radius = shape.r * fit.geometryScale;
+  const fittedOuterRadius = radius + fit.strokeWidth / 2;
   return {
     ...shape,
     cx: clamp(
@@ -857,7 +962,7 @@ function fitCircleToImage(
       imageHeight - fittedOuterRadius,
     ),
     r: radius,
-    strokeWidth: fittedStrokeWidth,
+    strokeWidth: fit.strokeWidth,
   };
 }
 
@@ -891,7 +996,7 @@ function renderedEllipseExtents(
   };
 }
 
-function fitEllipseToImage(
+export function fitEllipseToImage(
   shape: Extract<TracedShape, { kind: 'ellipse' }>,
   imageWidth: number,
   imageHeight: number,
@@ -905,39 +1010,28 @@ function fitEllipseToImage(
       || shape.ry <= 0) {
     return null;
   }
-  let rx = shape.rx;
-  let ry = shape.ry;
-  let strokeWidth = effectivePrimitiveStrokeWidth(shape);
-  let extents = renderedEllipseExtents(
-    rx,
-    ry,
-    shape.angle,
+  const strokeWidth = effectivePrimitiveStrokeWidth(shape);
+  const geometryExtents = ellipseExtents(shape.rx, shape.ry, shape.angle);
+  const fit = primitiveFitScale(
+    geometryExtents.x * 2,
+    geometryExtents.y * 2,
     strokeWidth,
-  );
-  const radiusScale = Math.min(
     1,
-    imageWidth / Math.max(Number.EPSILON, extents.x * 2),
-    imageHeight / Math.max(Number.EPSILON, extents.y * 2),
+    1,
+    imageWidth,
+    imageHeight,
   );
-  if (radiusScale < 1) {
-    rx *= radiusScale;
-    ry *= radiusScale;
-    strokeWidth *= radiusScale;
-    if (strokeWidth < MIN_TRACED_STROKE_WIDTH) return null;
-    extents = renderedEllipseExtents(
-      rx,
-      ry,
-      shape.angle,
-      strokeWidth,
-    );
-  }
+  if (!fit) return null;
+  const rx = shape.rx * fit.geometryScale;
+  const ry = shape.ry * fit.geometryScale;
+  const extents = renderedEllipseExtents(rx, ry, shape.angle, fit.strokeWidth);
   return {
     ...shape,
     cx: clamp(shape.cx, extents.x, imageWidth - extents.x),
     cy: clamp(shape.cy, extents.y, imageHeight - extents.y),
     rx,
     ry,
-    strokeWidth,
+    strokeWidth: fit.strokeWidth,
   };
 }
 
@@ -991,6 +1085,24 @@ function sanitizeShape(
       return sanitized ? fitEllipseToImage(sanitized, width, height) : null;
     }
   }
+}
+
+export function countDroppedCenterlineCandidates(
+  centerlineComponentIds: ReadonlySet<number>,
+  adoptedComponentIds: ReadonlySet<number>,
+  rejectedCountByComponent: ReadonlyMap<number, number>,
+): number {
+  let droppedCount = 0;
+  for (const componentId of centerlineComponentIds) {
+    if (adoptedComponentIds.has(componentId)) {
+      droppedCount += rejectedCountByComponent.get(componentId) ?? 0;
+    } else {
+      // Its contours were deliberately excluded, so count the unrepresented
+      // component once regardless of how many centerline paths were rejected.
+      droppedCount += 1;
+    }
+  }
+  return droppedCount;
 }
 
 /**
@@ -1125,25 +1237,23 @@ export async function executeTracePipeline(
     const compoundPolygon: TracedShape = {
       kind: 'polygon',
       points: candidate.points,
-      holes: candidate.holes?.length ? candidate.holes : undefined,
+      holes: candidate.holes.length ? candidate.holes : undefined,
       closed: true,
     };
     if (options.mode === 'cleanup') {
-      const strokeWidth = candidate.source === 'contour'
-        ? estimateOutlinedStrokeWidth(candidate as OuterContourCandidate)
-        : DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH;
+      const strokeWidth = estimateOutlinedStrokeWidth(candidate);
       const classified = classifyShape(candidate.points, {
         closed: candidate.closed,
         strokeWidth,
       });
       if (classified.kind === 'polygon') return compoundPolygon;
       if (!isCleanupPrimitive(classified)) {
-        return candidate.holes?.length ? compoundPolygon : classified;
+        return candidate.holes.length ? compoundPolygon : classified;
       }
       if (
-        candidate.holes?.length
+        candidate.holes.length
         && !isCompatibleOutlinedPrimitive(
-          candidate as OuterContourCandidate,
+          candidate,
           classified,
           strokeWidth,
           options.simplifyTolerance,
@@ -1173,10 +1283,10 @@ export async function executeTracePipeline(
     const sanitized = sanitizeShape(shape, imageData.width, imageData.height);
     if (sanitized) {
       sanitizedShapes.push(sanitized);
-      if (candidate.source === 'centerline' && candidate.componentId !== undefined) {
+      if (candidate.source === 'centerline') {
         adoptedCenterlineComponentIds.add(candidate.componentId);
       }
-    } else if (candidate.source === 'centerline' && candidate.componentId !== undefined) {
+    } else if (candidate.source === 'centerline') {
       rejectedCenterlineCountByComponent.set(
         candidate.componentId,
         (rejectedCenterlineCountByComponent.get(candidate.componentId) ?? 0) + 1,
@@ -1190,15 +1300,11 @@ export async function executeTracePipeline(
     throw new TracePipelineError('NO_SHAPES', 'No traceable shapes were detected.');
   }
 
-  for (const componentId of centerlineComponentIds) {
-    if (adoptedCenterlineComponentIds.has(componentId)) {
-      droppedCount += rejectedCenterlineCountByComponent.get(componentId) ?? 0;
-    } else {
-      // Its contours were deliberately excluded, so count the unrepresented
-      // component once regardless of how many centerline paths were rejected.
-      droppedCount += 1;
-    }
-  }
+  droppedCount += countDroppedCenterlineCandidates(
+    centerlineComponentIds,
+    adoptedCenterlineComponentIds,
+    rejectedCenterlineCountByComponent,
+  );
 
   const vertexCount = shapes.reduce(
     (total, shape) => total + shapeVertexCount(shape),

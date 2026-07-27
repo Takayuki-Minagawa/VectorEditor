@@ -33,6 +33,9 @@ function shapeToFabricObject(
   shape: TracedShape,
   color: string,
 ): fabric.FabricObject {
+  // Traced stroke width is measured source geometry, not an editor style.
+  // Keep it scaling with the object so fitting and later transforms preserve
+  // the vectorized image's proportions.
   const lineStyle = {
     fill: '',
     stroke: color,

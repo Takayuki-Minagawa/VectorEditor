@@ -63,6 +63,12 @@ describe('trace worker protocol guards', () => {
     expect(isTraceWorkerRequest({
       type: 'trace',
       jobId: 1,
+      imageData: imageData(),
+      options: { ...DEFAULT_TRACE_OPTIONS, coordinateSnap: 10.5 },
+    })).toBe(false);
+    expect(isTraceWorkerRequest({
+      type: 'trace',
+      jobId: 1,
       imageData: { ...imageData(), data: new Uint8ClampedArray(3) },
       options: { ...DEFAULT_TRACE_OPTIONS },
     })).toBe(false);

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   validateTracedDrawing,
   DEFAULT_TRACE_OPTIONS,
+  MIN_TRACED_STROKE_WIDTH,
   type TraceOptions,
   type TracedShape,
 } from '../domain/trace/tracedDrawing';
@@ -11,8 +12,12 @@ import {
   classifyTraceError,
   centerOutlinedPrimitiveGeometry,
   componentIdAtPoint,
+  countDroppedCenterlineCandidates,
   estimateOutlinedStrokeWidth,
   executeTracePipeline,
+  fitCircleToImage,
+  fitEllipseToImage,
+  fitRectToImage,
   groupContourCandidates,
   TracePipelineError,
   type SimplifiedTraceContour,
@@ -115,6 +120,17 @@ describe('executeTracePipeline', () => {
     expect(componentIdAtPoint({ x: 0.5, y: 0.5 }, labeling, 3, 1)).toBe(4);
     expect(componentIdAtPoint({ x: 2.5, y: 0.5 }, labeling, 3, 1)).toBe(12);
     expect(componentIdAtPoint({ x: Number.NaN, y: 0.5 }, labeling, 3, 1)).toBe(0);
+  });
+
+  it('counts an unrepresented centerline component once', () => {
+    expect(countDroppedCenterlineCandidates(
+      new Set([1, 2]),
+      new Set([1]),
+      new Map([
+        [1, 2],
+        [2, 4],
+      ]),
+    )).toBe(3);
   });
 
   it('groups multiple outers and holes without changing parent priority or order', () => {
@@ -282,6 +298,60 @@ describe('executeTracePipeline', () => {
       r: 1,
       strokeWidth: 2,
     }, 2)).toBeNull();
+  });
+
+  it('keeps fitted primitives when proportional scaling reaches the minimum stroke', () => {
+    const rectAngle = 45;
+    const rectRadians = rectAngle * Math.PI / 180;
+    const rectWidth = 9;
+    const rectHeight = 5;
+    const rect = fitRectToImage({
+      kind: 'rect',
+      x: 5
+        - Math.cos(rectRadians) * rectWidth / 2
+        + Math.sin(rectRadians) * rectHeight / 2,
+      y: 5
+        - Math.sin(rectRadians) * rectWidth / 2
+        - Math.cos(rectRadians) * rectHeight / 2,
+      width: rectWidth,
+      height: rectHeight,
+      angle: rectAngle,
+      strokeWidth: MIN_TRACED_STROKE_WIDTH,
+    }, 10, 10);
+    const circle = fitCircleToImage({
+      kind: 'circle',
+      cx: 5,
+      cy: 5,
+      r: 5,
+      strokeWidth: MIN_TRACED_STROKE_WIDTH,
+    }, 10, 10);
+    const ellipse = fitEllipseToImage({
+      kind: 'ellipse',
+      cx: 5,
+      cy: 5,
+      rx: 6,
+      ry: 3,
+      angle: 30,
+      strokeWidth: MIN_TRACED_STROKE_WIDTH,
+    }, 10, 10);
+
+    expect(rect).not.toBeNull();
+    expect(circle).not.toBeNull();
+    expect(ellipse).not.toBeNull();
+    for (const shape of [rect, circle, ellipse]) {
+      expect(shape?.strokeWidth).toBe(MIN_TRACED_STROKE_WIDTH);
+      if (!shape) continue;
+      const bounds = renderedPrimitiveBounds(shape);
+      expect(bounds.minX).toBeGreaterThanOrEqual(-1e-8);
+      expect(bounds.minY).toBeGreaterThanOrEqual(-1e-8);
+      expect(bounds.maxX).toBeLessThanOrEqual(10 + 1e-8);
+      expect(bounds.maxY).toBeLessThanOrEqual(10 + 1e-8);
+    }
+    expect(rect && rect.width / rect.height).toBeCloseTo(
+      rectWidth / rectHeight,
+      10,
+    );
+    expect(ellipse && ellipse.rx / ellipse.ry).toBeCloseTo(2, 10);
   });
 
   it('traces a synthetic filled component and reports every pipeline stage', async () => {
@@ -724,7 +794,7 @@ describe('executeTracePipeline', () => {
     expect(closed).toBeDefined();
   });
 
-  it('counts a line-like component once when its centerline is rejected', async () => {
+  it('preserves a short line-like component under coordinate snapping', async () => {
     const drawing = await executeTracePipeline(
       raster(30, 20, (x, y) => (
         (y === 2 && x >= 1 && x <= 6)
@@ -738,11 +808,12 @@ describe('executeTracePipeline', () => {
       { yieldControl: noDelay },
     );
 
-    expect(drawing.shapes).toEqual([
+    expect(drawing.shapes).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'rect' }),
-    ]);
+      expect.objectContaining({ kind: 'line' }),
+    ]));
     expect(drawing.stats.componentCount).toBe(2);
-    expect(drawing.stats.droppedCount).toBe(1);
+    expect(drawing.stats.droppedCount).toBe(0);
   });
 
   it('keeps a one-pixel line with the default preprocessing options', async () => {
@@ -754,6 +825,13 @@ describe('executeTracePipeline', () => {
 
     expect(drawing.shapes.length).toBeGreaterThan(0);
     expect(drawing.stats.componentCount).toBe(1);
+    const centerlineShapes = drawing.shapes.filter(
+      (shape) => shape.kind === 'line' || shape.kind === 'polyline',
+    );
+    expect(centerlineShapes).not.toHaveLength(0);
+    expect(centerlineShapes.every(
+      (shape) => shape.strokeWidth >= MIN_TRACED_STROKE_WIDTH,
+    )).toBe(true);
   });
 
   it('fits a rotated edge-touching cleanup primitive inside its source image', async () => {

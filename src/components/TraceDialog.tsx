@@ -19,6 +19,7 @@ import {
 } from '../services/traceService';
 import {
   DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+  MAX_TRACE_COORDINATE_SNAP,
   MIN_TRACED_STROKE_WIDTH,
   type TracedDrawing,
   type TracedShape,
@@ -637,7 +638,7 @@ export default function TraceDialog({ sourceImage, onClose }: TraceDialogProps) 
                 <input
                   type="range"
                   min={0}
-                  max={10}
+                  max={MAX_TRACE_COORDINATE_SNAP}
                   step={0.5}
                   value={options.coordinateSnap}
                   onChange={(event) => updateOption(

@@ -215,6 +215,7 @@ describe('traced drawing domain', () => {
       medianRadius: 99,
       sauvolaWindow: 10,
       angleSnapDeg: 90,
+      coordinateSnap: 999,
     });
     expect(normalized).toEqual(expect.objectContaining({
       mode: 'cleanup',
@@ -222,12 +223,21 @@ describe('traced drawing domain', () => {
       medianRadius: 8,
       sauvolaWindow: 11,
       angleSnapDeg: 22.5,
+      coordinateSnap: 10,
     }));
     expect(DEFAULT_TRACE_OPTIONS.medianRadius).toBe(0);
     expect(isTraceOptions({ ...DEFAULT_TRACE_OPTIONS, threshold: 300 })).toBe(false);
     expect(isTraceOptions({
       ...DEFAULT_TRACE_OPTIONS,
       vertexLimit: 250_001,
+    })).toBe(false);
+    expect(isTraceOptions({
+      ...DEFAULT_TRACE_OPTIONS,
+      coordinateSnap: 10,
+    })).toBe(true);
+    expect(isTraceOptions({
+      ...DEFAULT_TRACE_OPTIONS,
+      coordinateSnap: 10.5,
     })).toBe(false);
   });
 });

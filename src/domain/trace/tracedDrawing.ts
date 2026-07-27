@@ -9,6 +9,7 @@ export const TRACED_DRAWING_VERSION = 1 as const;
 export const MAX_TRACED_VERTICES = 250_000;
 export const MIN_TRACED_STROKE_WIDTH = 0.5;
 export const DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH = 2;
+export const MAX_TRACE_COORDINATE_SNAP = 10;
 
 export interface TracedPoint {
   x: number;
@@ -152,6 +153,7 @@ export function isTraceOptions(value: unknown): value is TraceOptions {
     && value.angleSnapDeg <= 22.5
     && isFiniteNumber(value.coordinateSnap)
     && value.coordinateSnap >= 0
+    && value.coordinateSnap <= MAX_TRACE_COORDINATE_SNAP
     && isPositiveInteger(value.sauvolaWindow)
     && value.sauvolaWindow >= 3
     && value.sauvolaWindow % 2 === 1
@@ -203,10 +205,11 @@ export function normalizeTraceOptions(
       0,
       22.5,
     ),
-    coordinateSnap: Math.max(0, finiteOr(
-      merged.coordinateSnap,
-      DEFAULT_TRACE_OPTIONS.coordinateSnap,
-    )),
+    coordinateSnap: clamp(
+      finiteOr(merged.coordinateSnap, DEFAULT_TRACE_OPTIONS.coordinateSnap),
+      0,
+      MAX_TRACE_COORDINATE_SNAP,
+    ),
     sauvolaWindow: sauvolaWindow % 2 === 0 ? sauvolaWindow + 1 : sauvolaWindow,
     sauvolaK: clamp(
       finiteOr(merged.sauvolaK, DEFAULT_TRACE_OPTIONS.sauvolaK),

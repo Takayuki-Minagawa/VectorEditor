@@ -1,7 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type * as fabric from 'fabric';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TracedDrawing } from '../domain/trace/tracedDrawing';
+import {
+  MAX_TRACE_COORDINATE_SNAP,
+  type TracedDrawing,
+} from '../domain/trace/tracedDrawing';
 import { useI18n } from '../i18n/useI18n';
 import { useEditorStore } from '../store/useEditorStore';
 import TraceDialog from './TraceDialog';
@@ -275,7 +278,12 @@ describe('TraceDialog', () => {
     fireEvent.change(screen.getByLabelText(/角度スナップ/), {
       target: { value: '4.5' },
     });
-    fireEvent.change(screen.getByLabelText(/座標スナップ/), {
+    const coordinateSnap = screen.getByLabelText(/座標スナップ/);
+    expect(coordinateSnap).toHaveAttribute(
+      'max',
+      String(MAX_TRACE_COORDINATE_SNAP),
+    );
+    fireEvent.change(coordinateSnap, {
       target: { value: '1.5' },
     });
     act(() => {

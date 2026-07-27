@@ -155,15 +155,15 @@ describe('cleanup alignment', () => {
     });
     expect(result[0]).toEqual({
       kind: 'rect',
-      x: 12.5,
+      x: 11,
       y: 10,
-      width: 17.5,
+      width: 19,
       height: 20,
       angle: 0,
     });
     expect(result[1]).toEqual({
       kind: 'rect',
-      x: 12.5,
+      x: 11,
       y: 50,
       width: 15,
       height: 8,
@@ -171,9 +171,9 @@ describe('cleanup alignment', () => {
     });
     expect(result[2]).toEqual({
       kind: 'line',
-      x1: 12.5,
+      x1: 14,
       y1: 70,
-      x2: 12.5,
+      x2: 14,
       y2: 90,
       strokeWidth: 2,
     });
@@ -185,6 +185,90 @@ describe('cleanup alignment', () => {
       height: 20,
       angle: 0,
     });
+  });
+
+  it('keeps free-form polygon and polyline vertices out of peer snapping', () => {
+    const input: TracedShape[] = [{
+      kind: 'polygon',
+      points: [
+        { x: 0, y: 0 },
+        { x: 9, y: 1 },
+        { x: 5, y: 9 },
+      ],
+      holes: [[
+        { x: 3, y: 3 },
+        { x: 5, y: 3 },
+        { x: 4, y: 5 },
+      ]],
+      closed: true,
+    }, {
+      kind: 'polyline',
+      points: [
+        { x: 1, y: 1 },
+        { x: 4, y: 8 },
+        { x: 8, y: 2 },
+      ],
+      strokeWidth: 1,
+    }];
+
+    const result = alignShapes(input, { coordinateSnap: 10 });
+
+    expect(result).toEqual(input);
+    expect(result[0]).not.toBe(input[0]);
+    expect(result[1]).not.toBe(input[1]);
+    if (result[0].kind === 'polygon' && input[0].kind === 'polygon') {
+      expect(result[0].points).not.toBe(input[0].points);
+      expect(result[0].holes).not.toBe(input[0].holes);
+      expect(result[0].holes?.[0]).not.toBe(input[0].holes?.[0]);
+    }
+    if (result[1].kind === 'polyline' && input[1].kind === 'polyline') {
+      expect(result[1].points).not.toBe(input[1].points);
+    }
+  });
+
+  it('limits every coordinate cluster to the requested full span', () => {
+    const input: TracedShape[] = Array.from({ length: 6 }, (_, index) => ({
+      kind: 'circle',
+      cx: index,
+      cy: index * 100,
+      r: 1,
+    }));
+
+    const result = alignShapes(input, { coordinateSnap: 3 });
+
+    expect(result.map((shape) => (
+      shape.kind === 'circle' ? shape.cx : Number.NaN
+    ))).toEqual([1.5, 1.5, 1.5, 1.5, 4.5, 4.5]);
+  });
+
+  it('does not collapse short lines or two-point polylines into a point', () => {
+    const input: TracedShape[] = [{
+      kind: 'line',
+      x1: 0,
+      y1: 0,
+      x2: 2,
+      y2: 2,
+      strokeWidth: 1,
+    }, {
+      kind: 'polyline',
+      points: [
+        { x: 20, y: 20 },
+        { x: 22, y: 22 },
+      ],
+      strokeWidth: 1,
+    }];
+
+    const result = alignShapes(input, {
+      angleSnapDeg: 0,
+      coordinateSnap: 3,
+    });
+
+    expect(result).toEqual(input);
+    expect(result[0]).not.toBe(input[0]);
+    expect(result[1]).not.toBe(input[1]);
+    if (result[1].kind === 'polyline' && input[1].kind === 'polyline') {
+      expect(result[1].points).not.toBe(input[1].points);
+    }
   });
 
   it('preserves compound polygon holes without clustering them into the outer ring', () => {

@@ -144,31 +144,38 @@ function clusteredValues(values: readonly number[], tolerance: number): number[]
   const output = [...values];
   let cluster: typeof indexed = [];
   let mean = 0;
+  let clusterStart = 0;
 
   const commit = (): void => {
     if (cluster.length <= 1) {
       cluster = [];
       mean = 0;
+      clusterStart = 0;
       return;
     }
     for (const entry of cluster) output[entry.index] = mean;
     cluster = [];
     mean = 0;
+    clusterStart = 0;
   };
 
   for (const entry of indexed) {
     if (cluster.length === 0) {
       cluster = [entry];
       mean = entry.value;
+      clusterStart = entry.value;
       continue;
     }
-    if (Math.abs(entry.value - mean) <= tolerance) {
+    // Compare against the first (smallest) value so a chain of nearby values
+    // cannot grow a cluster beyond the advertised tolerance.
+    if (entry.value - clusterStart <= tolerance) {
       cluster.push(entry);
       mean += (entry.value - mean) / cluster.length;
     } else {
       commit();
       cluster = [entry];
       mean = entry.value;
+      clusterStart = entry.value;
     }
   }
   commit();
@@ -193,14 +200,14 @@ interface CollectedCoordinates {
   slices: ShapeCoordinateSlice[];
 }
 
-function shapeCoordinates(shape: TracedShape): TracedPoint[] {
+function shapeAnchorCoordinates(shape: TracedShape): TracedPoint[] {
   switch (shape.kind) {
     case 'polygon':
-      // Keep interior rings out of peer clustering: snapping a narrow hole
-      // onto its outer ring would erase the negative space under even-odd fill.
-      return shape.points;
+      // Preserve free-form outlines and their holes. Moving every vertex can
+      // collapse small marks when cleanup snapping is set aggressively.
+      return [];
     case 'polyline':
-      return shape.points;
+      return shape.points.length === 2 ? shape.points : [];
     case 'line':
       return [
         { x: shape.x1, y: shape.y1 },
@@ -226,7 +233,7 @@ function collectCoordinates(
   const y: number[] = [];
   const slices: ShapeCoordinateSlice[] = [];
   shapes.forEach((shape, shapeIndex) => {
-    const points = shapeCoordinates(shape);
+    const points = shapeAnchorCoordinates(shape);
     const offset = x.length;
     for (const point of points) {
       x.push(point.x);
@@ -272,18 +279,38 @@ function alignCoordinates(
       case 'polygon':
         return {
           ...shape,
-          points,
+          points: shape.points.map((point) => ({ ...point })),
           holes: shape.holes?.map((hole) => (
             hole.map((point) => ({ ...point }))
           )),
         };
       case 'polyline':
+        if (
+          points.length === 2
+          && Math.hypot(
+            points[1].x - points[0].x,
+            points[1].y - points[0].y,
+          ) <= Number.EPSILON
+        ) {
+          return {
+            ...shape,
+            points: shape.points.map((point) => ({ ...point })),
+          };
+        }
         return {
           ...shape,
-          points,
+          points: points.length === shape.points.length
+            ? points
+            : shape.points.map((point) => ({ ...point })),
         };
       case 'line': {
         const [first, second] = points;
+        if (
+          Math.hypot(second.x - first.x, second.y - first.y)
+            <= Number.EPSILON
+        ) {
+          return { ...shape };
+        }
         return {
           ...shape,
           x1: first.x,
@@ -320,8 +347,9 @@ function alignCoordinates(
 }
 
 /**
- * Snaps near-cardinal directions, then clusters nearby x/y coordinates across
- * shapes. Input objects and point arrays are never mutated.
+ * Snaps near-cardinal directions, then clusters nearby x/y anchor coordinates
+ * across recognized shapes. Free-form vertices are preserved, and input
+ * objects and point arrays are never mutated.
  */
 export function alignShapes(
   shapes: readonly TracedShape[],
