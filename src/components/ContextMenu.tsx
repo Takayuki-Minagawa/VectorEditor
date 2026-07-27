@@ -21,8 +21,13 @@ import {
 } from '../utils/sectionCommands';
 import { isSupportedSectionSourceObject } from '../utils/sectionGeometry';
 import { openSectionOperations } from '../utils/sectionUiEvents';
+import { openTraceDialog } from '../utils/traceUiEvents';
 
-interface MenuPos { x: number; y: number; }
+interface MenuPos {
+  x: number;
+  y: number;
+  sourceImage?: fabric.Image;
+}
 
 export default function ContextMenu() {
   const [pos, setPos] = useState<MenuPos | null>(null);
@@ -45,7 +50,13 @@ export default function ContextMenu() {
     };
     const handleMouseUp = (opt: fabric.TPointerEventInfo) => {
       const me = opt.e as MouseEvent;
-      if (me.button === 2) setPos({ x: me.clientX, y: me.clientY });
+      if (me.button === 2) {
+        setPos({
+          x: me.clientX,
+          y: me.clientY,
+          sourceImage: opt.target instanceof fabric.Image ? opt.target : undefined,
+        });
+      }
     };
     canvas.upperCanvasEl.addEventListener('contextmenu', preventDefaultContextMenu);
     return disposeAll([
@@ -71,6 +82,8 @@ export default function ContextMenu() {
   const isGroup = active instanceof fabric.Group;
   const isMultiple = active instanceof fabric.ActiveSelection;
   const canFillet = !!active && !isMultiple && isSupportedSectionSourceObject(active);
+  const traceSource = pos.sourceImage
+    ?? (active instanceof fabric.Image ? active : undefined);
 
   const exec = (fn: () => void) => { fn(); close(); };
 
@@ -87,6 +100,7 @@ export default function ContextMenu() {
   const handleBringForward = () => exec(() => stackActive(canvas, 'bringForward', pushHistory));
   const handleSendBackward = () => exec(() => stackActive(canvas, 'sendBackward', pushHistory));
   const handleLock = () => exec(() => toggleActiveLock(canvas));
+  const handleTrace = () => exec(() => openTraceDialog(traceSource));
   const runSectionOperation = (operation: () => void) => exec(() => {
     try {
       operation();
@@ -112,6 +126,7 @@ export default function ContextMenu() {
         <>
           <button className="context-item" onClick={handleCopy}>{t('ctx_copy')}</button>
           <button className="context-item" onClick={handleDuplicate}>{t('ctx_duplicate')}</button>
+          {traceSource && <button className="context-item" onClick={handleTrace}>{t('ctx_trace')}</button>}
           <div className="context-divider" />
           <button className="context-item" onClick={handleFlipH}>{t('ctx_flipH')}</button>
           <button className="context-item" onClick={handleFlipV}>{t('ctx_flipV')}</button>
@@ -136,6 +151,8 @@ export default function ContextMenu() {
           <div className="context-divider" />
           <button className="context-item danger" onClick={handleDelete}>{t('ctx_delete')}</button>
         </>
+      ) : traceSource ? (
+        <button className="context-item" onClick={handleTrace}>{t('ctx_trace')}</button>
       ) : (
         <button className="context-item" onClick={handlePaste} disabled={!clipboard}>{t('ctx_paste')}</button>
       )}

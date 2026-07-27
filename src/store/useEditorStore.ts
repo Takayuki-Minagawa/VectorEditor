@@ -23,6 +23,13 @@ import {
 import type { Theme } from '../utils/themePreference';
 import { configureCanvasForTool } from '../utils/toolActivation';
 import { createToastId, scheduleToastRemoval } from '../utils/toastScheduler';
+import { toFabricObjects } from '../domain/trace/toFabricObjects';
+import type { TracedDrawing } from '../domain/trace/tracedDrawing';
+
+export interface InsertTracedDrawingOptions {
+  group?: boolean;
+  color?: string;
+}
 
 export interface EditorStore {
   // Tool
@@ -43,6 +50,10 @@ export interface EditorStore {
   setCanvasSize: (w: number, h: number) => void;
   backgroundColor: string;
   setBackgroundColor: (color: string) => void;
+  insertTracedDrawing: (
+    drawing: TracedDrawing,
+    options?: InsertTracedDrawingOptions,
+  ) => fabric.FabricObject[];
 
   // Zoom
   zoom: number;
@@ -388,6 +399,41 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (color === get().backgroundColor) return;
       set({ backgroundColor: color });
       recordSettingChange();
+    },
+    insertTracedDrawing: (drawing, options = {}) => {
+      const canvas = get().canvas;
+      if (!canvas) return [];
+      const objects = toFabricObjects(drawing, {
+        canvas,
+        group: options.group,
+        color: options.color,
+      });
+      if (objects.length === 0) return [];
+
+      const added: fabric.FabricObject[] = [];
+      get().beginHistoryTransaction();
+      try {
+        canvas.discardActiveObject();
+        objects.forEach((object) => {
+          canvas.add(object);
+          added.push(object);
+        });
+        if (objects.length === 1) {
+          canvas.setActiveObject(objects[0]);
+        } else {
+          canvas.setActiveObject(new fabric.ActiveSelection(objects, { canvas }));
+        }
+        canvas.requestRenderAll();
+        get().pushHistory();
+        get().endHistoryTransaction();
+        return objects;
+      } catch (error) {
+        canvas.discardActiveObject();
+        added.forEach((object) => canvas.remove(object));
+        get().cancelHistoryTransaction();
+        canvas.requestRenderAll();
+        throw error;
+      }
     },
 
     zoom: 1,

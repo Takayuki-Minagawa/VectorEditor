@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import { useUiStore } from '../store/useUiStore';
 import { useI18n } from '../i18n/useI18n';
@@ -18,6 +19,7 @@ import {
 } from '../utils/sectionCommands';
 import { isSupportedSectionSourceObject } from '../utils/sectionGeometry';
 import { openSectionOperations } from '../utils/sectionUiEvents';
+import { openTraceDialog } from '../utils/traceUiEvents';
 import Dialog from './Dialog';
 
 interface EditorAction {
@@ -115,6 +117,16 @@ export default function CommandPalette() {
       { id: 'toggle-rulers', label: t('rulers'), keywords: 'ruler guide', perform: toggleRulers },
       { id: 'toggle-ortho', label: t('ortho'), keywords: 'orthogonal angle', perform: toggleOrtho },
       { id: 'toggle-theme', label: t('tip_theme'), keywords: 'theme dark light', perform: toggleTheme },
+      {
+        id: 'trace-image',
+        label: t('traceVectorize'),
+        keywords: 'vectorize trace image raster bitmap handwriting ベクター化 画像 手書き',
+        disabled: !canvas || isRestoring,
+        perform: () => {
+          const active = canvas?.getActiveObject();
+          openTraceDialog(active instanceof fabric.Image ? active : undefined);
+        },
+      },
       {
         id: 'section-create',
         label: t('sectionCreate'),

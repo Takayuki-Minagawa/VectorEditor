@@ -21,6 +21,7 @@ import NumericMoveDialog from './NumericMoveDialog';
 import ExportDialog from './ExportDialog';
 import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
 import { OPEN_SECTION_OPERATIONS_EVENT } from '../utils/sectionUiEvents';
+import { openTraceDialog } from '../utils/traceUiEvents';
 import SectionOperationsDialog from './SectionOperationsDialog';
 
 type Alignment = 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom';
@@ -303,6 +304,14 @@ export default function Toolbar() {
         <button className="toolbar-btn" onClick={handleSaveJSON} title={t('tip_save')}>{t('save')}</button>
         <button className="toolbar-btn" onClick={handleLoadJSON} title={t('tip_load')}>{t('load')}</button>
         <button className="toolbar-btn" onClick={handleImport} title={t('tip_import')}>{t('import')}</button>
+        <button
+          className="toolbar-btn"
+          onClick={() => openTraceDialog()}
+          title={t('tip_trace')}
+          disabled={!canvas || isRestoring}
+        >
+          {t('traceVectorize')}
+        </button>
         <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileChange} />
         <input ref={importInputRef} type="file" accept=".svg,.png,.jpg,.jpeg,.gif,.webp" style={{ display: 'none' }} onChange={handleImportFileChange} />
       </div>

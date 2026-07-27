@@ -14,6 +14,7 @@ import Dialog from './components/Dialog';
 import IconButton from './components/IconButton';
 import CommandPalette from './components/CommandPalette';
 import ProjectManager from './components/ProjectManager';
+import TraceDialog from './components/TraceDialog';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { clearAutoSave, loadAutoSaveAsync, useAutoSave, type AutoSaveData } from './hooks/useAutoSave';
 import { captureCurrentEditorSnapshot, useEditorStore } from './store/useEditorStore';
@@ -23,6 +24,10 @@ import {
   isDocumentRestoreSupersededError,
   restoreDocumentData,
 } from './utils/documentSerializer';
+import {
+  OPEN_TRACE_DIALOG_EVENT,
+  type OpenTraceDialogDetail,
+} from './utils/traceUiEvents';
 
 function App() {
   const canvas = useEditorStore((s) => s.canvas);
@@ -46,6 +51,15 @@ function App() {
   // True from the moment the user confirms a restore until loadFromJSON()
   // settles, so async restores (large/image-heavy data) aren't overwritten.
   const [restoring, setRestoring] = useState(false);
+  const [traceRequest, setTraceRequest] = useState<OpenTraceDialogDetail | null>(null);
+
+  useEffect(() => {
+    const openTrace = (event: Event) => {
+      setTraceRequest((event as CustomEvent<OpenTraceDialogDetail>).detail ?? {});
+    };
+    window.addEventListener(OPEN_TRACE_DIALOG_EVENT, openTrace);
+    return () => window.removeEventListener(OPEN_TRACE_DIALOG_EVENT, openTrace);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +205,12 @@ function App() {
         <ShortcutHelp />
         <Toast />
         <CommandPalette />
+        {traceRequest && (
+          <TraceDialog
+            sourceImage={traceRequest.sourceImage}
+            onClose={() => setTraceRequest(null)}
+          />
+        )}
 
       {pendingRestore && (
         <Dialog title={t('restoreTitle')} onClose={discardRestore} dismissible={false} maxWidth={380}>

@@ -13,6 +13,7 @@ Vector Illustration Editor v1.1.0 is a browser-based editor for diagrams, illust
 - CAD section profiles with material union, cut-outs, convex fillets, and geometric section properties
 - Full-document transactional Undo / Redo, versioned schema validation, and v1-to-v2 migration
 - IndexedDB-first auto-save, named projects with up to 20 snapshots, and reusable symbol assets
+- Browser-local image vectorization with faithful/cleanup modes, adaptive thresholding, centreline extraction, and editable output
 - Searchable, renameable, drag-sortable layer tree with multi-selection visibility and lock operations
 - Style presets and sampling/application of the current object style
 - Command palette (`Ctrl/⌘+K`), collapsible side panels, accessible dialogs, and responsive layouts
@@ -77,6 +78,21 @@ These are geometric section properties only. Material strength, member resistanc
 - Undo / Redo records the complete document state, including objects, canvas/CAD settings, grids, snapping, rulers, guides, scale, and Ortho mode
 - History restoration is serialized to avoid overlapping Fabric loads; history is capped at 50 snapshots or approximately 32 MiB
 - Import editable SVG or raster PNG, JPEG, GIF, and WebP content with asynchronous error reporting
+
+### Image vectorization
+
+Raster images and handwritten notes can be converted into editable vector objects without uploading the source image. The complete pipeline runs locally in the browser, remains available offline after the application has loaded, and does not call an external API.
+
+- Start from the toolbar or command palette, then drop or choose a PNG/JPEG/WebP/GIF image, or paste an image into the vectorization dialog with `Ctrl/⌘+V`
+- An existing raster object on the canvas can be sent to the same dialog from its context menu
+- **Faithful trace** preserves contours and handwriting as polygons/polylines; **Cleanup** recognizes line-, rectangle-, circle-, and ellipse-like geometry and aligns their anchors with adjustable snap strengths while preserving free-form vertices
+- Otsu thresholding handles relatively even backgrounds, while local Sauvola thresholding is available for photographed paper with shadows or uneven lighting
+- Noise removal, simplification, processing-size, and automatic-threshold controls let the result and vertex count be tuned before insertion
+- Thin elongated components are automatically represented by their centreline and stroke width; “Import as line art” forces centreline tracing for all suitable components
+- Processing runs in a Web Worker with progress, cancellation, a 60-second timeout, debounced SVG preview updates, shape/vertex statistics, and complexity warnings
+- Inserted Fabric objects are individually editable (or optionally grouped), selected after insertion, assigned fresh stable IDs, and committed as one transaction so one Undo removes the complete import
+
+OCR is not part of image vectorization. Printed and handwritten text is traced as geometry and can be replaced later with the text tool.
 
 ### Unified export
 
@@ -158,6 +174,7 @@ CI runs lint, type checking, unit tests, production dependency auditing, build, 
 src/
   components/
     Canvas.tsx             Fabric canvas lifecycle and interaction bridge
+    TraceDialog.tsx        Image input, trace controls, preview, and insertion
     ExportDialog.tsx       Unified SVG/PNG/PDF/DXF export UI
     ProjectManager.tsx     Named projects and version snapshots
     SymbolLibrary.tsx      Browser-local reusable assets
@@ -169,6 +186,7 @@ src/
     Dialog.tsx             Accessible modal primitive
   domain/
     section.ts             Section profile types and structural validation
+    trace/                 Pure preprocessing, contour, centreline, classification, alignment, and Fabric conversion
     tools.ts               Exhaustive tool registry and metadata
   hooks/
     useDrawingSession.ts   Drawing-session state and preview cleanup
@@ -176,6 +194,7 @@ src/
     useAutoSave.ts         Timed auto-save and legacy migration
   services/
     exportService.ts       Offscreen, viewport-independent export
+    traceService.ts        Worker jobs, progress, cancellation, timeout, and response validation
     dxfExporter.ts         AutoCAD R12 ASCII writer
     projectRepository.ts   IndexedDB projects and snapshots
     symbolRepository.ts    IndexedDB symbol assets
@@ -192,13 +211,19 @@ src/
     semanticObjects.ts     Linked dimensions and connectors
     cadSnapping.ts         CAD snap candidates
     stylePresets.ts        Typed editor styles and presets
+  workers/
+    traceWorker.ts         Browser-local image-vectorization pipeline
 e2e/                       Playwright scenarios
 ```
+
+The trace domain stages, intermediate-data validation, Fabric conversion, Worker protocol/service, and insertion history are covered by Vitest. Playwright scenarios exercise image input, preview, insertion, and single-step Undo through the browser UI.
 
 ## Changelog
 
 ### Unreleased
 
+- Added offline, browser-local image vectorization with faithful and cleanup modes, Otsu/Sauvola thresholding, contour and centreline tracing, and editable Fabric output
+- Added drop/file/clipboard/dialog and existing-raster input paths, Worker progress/cancellation, debounced SVG preview, result statistics, complexity limits, and one-step Undo insertion
 - Added CAD section profiles with material union, cut-outs, convex-corner fillets, and geometric section-property results
 - Added dimension-driven templates for rectangular/circular hollow, H, channel, and lipped-channel steel sections
 - Added robust ring/topology validation, large-coordinate numerical stabilization, principal-axis calculation, and large-profile Worker analysis

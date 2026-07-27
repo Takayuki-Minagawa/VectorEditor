@@ -15,6 +15,7 @@ const sections: Section[] = [
   { titleKey: 'help_tools_title', bodyKey: 'help_tools_body' },
   { titleKey: 'help_edit_title', bodyKey: 'help_edit_body' },
   { titleKey: 'help_file_title', bodyKey: 'help_file_body' },
+  { titleKey: 'help_trace_title', bodyKey: 'help_trace_body' },
   { titleKey: 'help_layer_title', bodyKey: 'help_layer_body' },
   { titleKey: 'help_cad_title', bodyKey: 'help_cad_body' },
   { titleKey: 'help_guides_title', bodyKey: 'help_guides_body' },

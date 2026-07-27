@@ -1936,6 +1936,305 @@ input[aria-invalid='true'] {
   color: #ffca80;
 }
 
+/* ===== Image vectorization ===== */
+.trace-dialog {
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(88vh, 760px);
+}
+
+.trace-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.trace-body.is-dragging {
+  box-shadow: inset 0 0 0 3px #2563eb;
+}
+
+.trace-preview-column {
+  display: flex;
+  min-width: 0;
+  min-height: 460px;
+  padding: 14px 16px;
+  flex-direction: column;
+  border-right: 1px solid #e5e7eb;
+}
+
+.trace-preview-header {
+  display: flex;
+  min-height: 24px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.trace-preview-header span {
+  max-width: 70%;
+  overflow: hidden;
+  color: #6b7280;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-dropzone {
+  display: flex;
+  flex: 1;
+  min-height: 300px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px;
+  border: 2px dashed #aab4c2;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  text-align: center;
+  flex-direction: column;
+}
+
+.trace-dropzone:hover {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.trace-drop-icon {
+  color: #2563eb;
+  font-size: 40px;
+  line-height: 1;
+}
+
+.trace-dropzone > span:not(.trace-drop-icon):not(.trace-file-button),
+.trace-dropzone small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.trace-file-button {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.trace-preview {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 300px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #d7dce2;
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, #f3f4f6 25%, transparent 25%),
+    linear-gradient(-45deg, #f3f4f6 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f3f4f6 75%),
+    linear-gradient(-45deg, transparent 75%, #f3f4f6 75%),
+    #fff;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+  color: #111827;
+}
+
+.trace-preview svg {
+  width: 100%;
+  height: 100%;
+  max-height: 480px;
+}
+
+.trace-preview-empty {
+  padding: 20px;
+  color: #6b7280;
+  font-size: 12px;
+  text-align: center;
+}
+
+.trace-progress-overlay {
+  position: absolute;
+  inset: auto 12px 12px;
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 11px;
+}
+
+.trace-progress-overlay progress {
+  width: 220px;
+  max-width: 100%;
+}
+
+.trace-replace {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
+.trace-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  color: #4b5563;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trace-warning,
+.trace-error,
+.trace-privacy {
+  margin: 8px 0 0;
+  padding: 7px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.trace-warning {
+  color: #854d0e;
+  background: #fef9c3;
+}
+
+.trace-error {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.trace-privacy {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.trace-controls {
+  display: flex;
+  min-height: 0;
+  gap: 13px;
+  padding: 14px 16px;
+  overflow-y: auto;
+  flex-direction: column;
+}
+
+.trace-controls > label:not(.trace-check) {
+  display: grid;
+  gap: 5px;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.trace-controls select {
+  width: 100%;
+  padding: 6px 7px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+}
+
+.trace-controls input[type='range'] {
+  width: 100%;
+}
+
+.trace-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: #374151;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.trace-check input {
+  margin: 1px 0 0;
+}
+
+.trace-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 10px 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.trace-insert {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.trace-insert:hover:not(:disabled) {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+[data-theme='dark'] .trace-preview-column,
+[data-theme='dark'] .trace-actions {
+  border-color: #444;
+}
+
+[data-theme='dark'] .trace-preview-header span,
+[data-theme='dark'] .trace-stats,
+[data-theme='dark'] .trace-dropzone > span:not(.trace-drop-icon):not(.trace-file-button),
+[data-theme='dark'] .trace-dropzone small {
+  color: #aaa;
+}
+
+[data-theme='dark'] .trace-dropzone {
+  border-color: #555;
+  background: #252525;
+  color: #ddd;
+}
+
+[data-theme='dark'] .trace-dropzone:hover {
+  border-color: #60a5fa;
+  background: #1e293b;
+}
+
+[data-theme='dark'] .trace-preview {
+  border-color: #444;
+  background: #fff;
+  color: #111827;
+}
+
+[data-theme='dark'] .trace-progress-overlay {
+  background: rgba(30, 30, 30, 0.94);
+  color: #e5e7eb;
+}
+
+[data-theme='dark'] .trace-controls > label:not(.trace-check),
+[data-theme='dark'] .trace-check {
+  color: #d1d5db;
+}
+
+[data-theme='dark'] .trace-controls select {
+  border-color: #555;
+  background: #242424;
+  color: #eee;
+}
+
+[data-theme='dark'] .trace-warning {
+  color: #fde68a;
+  background: #422006;
+}
+
+[data-theme='dark'] .trace-error {
+  color: #fecaca;
+  background: #450a0a;
+}
+
+[data-theme='dark'] .trace-privacy {
+  color: #cbd5e1;
+  background: #1e293b;
+}
+
 @media (max-width: 1100px) {
   .app-header {
     flex-wrap: wrap;
@@ -1962,6 +2261,27 @@ input[aria-invalid='true'] {
   .status-left,
   .status-right {
     flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 800px) {
+  .trace-dialog {
+    max-height: calc(100vh - 32px);
+  }
+
+  .trace-body {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .trace-preview-column {
+    min-height: 380px;
+    border-right: 0;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .trace-controls {
+    overflow: visible;
   }
 }
 
