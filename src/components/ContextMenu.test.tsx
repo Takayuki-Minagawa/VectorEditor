@@ -1,8 +1,12 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import * as fabric from 'fabric';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useI18n } from '../i18n/useI18n';
 import { useEditorStore } from '../store/useEditorStore';
+import {
+  OPEN_TRACE_DIALOG_EVENT,
+  type OpenTraceDialogDetail,
+} from '../utils/traceUiEvents';
 import ContextMenu from './ContextMenu';
 
 let previousLanguage = useI18n.getState().lang;
@@ -24,9 +28,10 @@ function createCanvasHarness(activeObject: fabric.FabricObject) {
 
   return {
     canvas,
-    fireContextMenu() {
+    fireContextMenu(target?: fabric.FabricObject) {
       const event = {
         e: { button: 2, clientX: 40, clientY: 60 } as MouseEvent,
+        target,
       } as fabric.TPointerEventInfo;
       [...(listeners.get('mouse:up') ?? [])].forEach((listener) => listener(event));
     },
@@ -66,5 +71,26 @@ describe('ContextMenu section operations', () => {
     act(() => harness.fireContextMenu());
 
     expect(screen.queryByRole('button', { name: '凸角にRを設定…' })).not.toBeInTheDocument();
+  });
+
+  it('offers vectorization for the raster image that was right-clicked', () => {
+    const active = new fabric.Rect({ width: 100, height: 60 });
+    const element = document.createElement('canvas');
+    element.width = 20;
+    element.height = 20;
+    const image = new fabric.Image(element);
+    const harness = createCanvasHarness(active);
+    const opened = vi.fn<(event: Event) => void>();
+    window.addEventListener(OPEN_TRACE_DIALOG_EVENT, opened, { once: true });
+    useI18n.getState().setLang('ja');
+    useEditorStore.setState({ canvas: harness.canvas });
+    render(<ContextMenu />);
+
+    act(() => harness.fireContextMenu(image));
+    fireEvent.click(screen.getByRole('button', { name: 'この画像をベクター化' }));
+
+    expect(opened).toHaveBeenCalledOnce();
+    const event = opened.mock.calls[0][0] as CustomEvent<OpenTraceDialogDetail>;
+    expect(event.detail.sourceImage).toBe(image);
   });
 });
