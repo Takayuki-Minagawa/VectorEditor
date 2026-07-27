@@ -65,6 +65,33 @@ function snapLineAngle(
   };
 }
 
+function snapRectAngle(
+  shape: Extract<TracedShape, { kind: 'rect' }>,
+  tolerance: number,
+  step: number,
+): Extract<TracedShape, { kind: 'rect' }> {
+  const snapped = snapAngle(shape.angle, tolerance, step);
+  if (snapped === shape.angle) return { ...shape };
+
+  const oldRadians = shape.angle * Math.PI / 180;
+  const oldCos = Math.cos(oldRadians);
+  const oldSin = Math.sin(oldRadians);
+  const halfWidth = shape.width / 2;
+  const halfHeight = shape.height / 2;
+  const centerX = shape.x + oldCos * halfWidth - oldSin * halfHeight;
+  const centerY = shape.y + oldSin * halfWidth + oldCos * halfHeight;
+
+  const newRadians = snapped * Math.PI / 180;
+  const newCos = Math.cos(newRadians);
+  const newSin = Math.sin(newRadians);
+  return {
+    ...shape,
+    x: centerX - newCos * halfWidth + newSin * halfHeight,
+    y: centerY - newSin * halfWidth - newCos * halfHeight,
+    angle: snapped,
+  };
+}
+
 function alignShapeAngle(
   shape: TracedShape,
   tolerance: number,
@@ -74,6 +101,7 @@ function alignShapeAngle(
     case 'line':
       return snapLineAngle(shape, tolerance, step);
     case 'rect':
+      return snapRectAngle(shape, tolerance, step);
     case 'ellipse':
       return { ...shape, angle: snapAngle(shape.angle, tolerance, step) };
     case 'polyline':
@@ -153,42 +181,82 @@ function isAxisAlignedRect(
   return angularDifference(shape.angle, Math.round(shape.angle / 180) * 180) < 1e-9;
 }
 
+interface ShapeCoordinateSlice {
+  shapeIndex: number;
+  offset: number;
+  length: number;
+}
+
+interface CollectedCoordinates {
+  x: number[];
+  y: number[];
+  slices: ShapeCoordinateSlice[];
+}
+
+function shapeCoordinates(shape: TracedShape): TracedPoint[] {
+  switch (shape.kind) {
+    case 'polygon':
+      // Keep interior rings out of peer clustering: snapping a narrow hole
+      // onto its outer ring would erase the negative space under even-odd fill.
+      return shape.points;
+    case 'polyline':
+      return shape.points;
+    case 'line':
+      return [
+        { x: shape.x1, y: shape.y1 },
+        { x: shape.x2, y: shape.y2 },
+      ];
+    case 'rect':
+      return isAxisAlignedRect(shape)
+        ? [
+          { x: shape.x, y: shape.y },
+          { x: shape.x + shape.width, y: shape.y + shape.height },
+        ]
+        : [{ x: shape.x, y: shape.y }];
+    case 'circle':
+    case 'ellipse':
+      return [{ x: shape.cx, y: shape.cy }];
+  }
+}
+
 function collectCoordinates(
   shapes: readonly TracedShape[],
-): { x: number[]; y: number[] } {
+): CollectedCoordinates {
   const x: number[] = [];
   const y: number[] = [];
-  const addPoint = (point: TracedPoint): void => {
-    x.push(point.x);
-    y.push(point.y);
-  };
-  for (const shape of shapes) {
-    switch (shape.kind) {
-      case 'polygon':
-        shape.points.forEach(addPoint);
-        // Keep interior rings out of peer clustering: snapping a narrow hole
-        // onto its outer ring would erase the negative space under even-odd fill.
-        break;
-      case 'polyline':
-        shape.points.forEach(addPoint);
-        break;
-      case 'line':
-        addPoint({ x: shape.x1, y: shape.y1 });
-        addPoint({ x: shape.x2, y: shape.y2 });
-        break;
-      case 'rect':
-        addPoint({ x: shape.x, y: shape.y });
-        if (isAxisAlignedRect(shape)) {
-          addPoint({ x: shape.x + shape.width, y: shape.y + shape.height });
-        }
-        break;
-      case 'circle':
-      case 'ellipse':
-        addPoint({ x: shape.cx, y: shape.cy });
-        break;
+  const slices: ShapeCoordinateSlice[] = [];
+  shapes.forEach((shape, shapeIndex) => {
+    const points = shapeCoordinates(shape);
+    const offset = x.length;
+    for (const point of points) {
+      x.push(point.x);
+      y.push(point.y);
     }
+    slices.push({ shapeIndex, offset, length: points.length });
+  });
+  return { x, y, slices };
+}
+
+function clusteredCoordinatesByShape(
+  coordinates: CollectedCoordinates,
+  tolerance: number,
+): TracedPoint[][] {
+  const clusteredX = clusteredValues(coordinates.x, tolerance);
+  const clusteredY = clusteredValues(coordinates.y, tolerance);
+  const result = Array.from(
+    { length: coordinates.slices.length },
+    (): TracedPoint[] => [],
+  );
+  for (const slice of coordinates.slices) {
+    result[slice.shapeIndex] = Array.from(
+      { length: slice.length },
+      (_, localIndex) => ({
+        x: clusteredX[slice.offset + localIndex],
+        y: clusteredY[slice.offset + localIndex],
+      }),
+    );
   }
-  return { x, y };
+  return result;
 }
 
 function alignCoordinates(
@@ -196,21 +264,15 @@ function alignCoordinates(
   tolerance: number,
 ): TracedShape[] {
   const coordinates = collectCoordinates(shapes);
-  const x = clusteredValues(coordinates.x, tolerance);
-  const y = clusteredValues(coordinates.y, tolerance);
-  let cursor = 0;
-  const nextPoint = (): TracedPoint => {
-    const point = { x: x[cursor], y: y[cursor] };
-    cursor += 1;
-    return point;
-  };
+  const pointsByShape = clusteredCoordinatesByShape(coordinates, tolerance);
 
-  return shapes.map((shape): TracedShape => {
+  return shapes.map((shape, shapeIndex): TracedShape => {
+    const points = pointsByShape[shapeIndex];
     switch (shape.kind) {
       case 'polygon':
         return {
           ...shape,
-          points: shape.points.map(() => nextPoint()),
+          points,
           holes: shape.holes?.map((hole) => (
             hole.map((point) => ({ ...point }))
           )),
@@ -218,11 +280,10 @@ function alignCoordinates(
       case 'polyline':
         return {
           ...shape,
-          points: shape.points.map(() => nextPoint()),
+          points,
         };
       case 'line': {
-        const first = nextPoint();
-        const second = nextPoint();
+        const [first, second] = points;
         return {
           ...shape,
           x1: first.x,
@@ -232,11 +293,10 @@ function alignCoordinates(
         };
       }
       case 'rect': {
-        const first = nextPoint();
+        const [first, opposite] = points;
         if (!isAxisAlignedRect(shape)) {
           return { ...shape, x: first.x, y: first.y };
         }
-        const opposite = nextPoint();
         const width = opposite.x - first.x;
         const height = opposite.y - first.y;
         return {
@@ -248,11 +308,11 @@ function alignCoordinates(
         };
       }
       case 'circle': {
-        const center = nextPoint();
+        const [center] = points;
         return { ...shape, cx: center.x, cy: center.y };
       }
       case 'ellipse': {
-        const center = nextPoint();
+        const [center] = points;
         return { ...shape, cx: center.x, cy: center.y };
       }
     }

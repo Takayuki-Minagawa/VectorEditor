@@ -101,8 +101,9 @@ describe('toFabricObjects', () => {
         width: 30,
         height: 20,
         angle: 12,
+        strokeWidth: 4,
       },
-      { kind: 'circle', cx: 155, cy: 15, r: 10 },
+      { kind: 'circle', cx: 155, cy: 15, r: 10, strokeWidth: 6 },
       {
         kind: 'ellipse',
         cx: 180,
@@ -110,6 +111,7 @@ describe('toFabricObjects', () => {
         rx: 14,
         ry: 8,
         angle: -8,
+        strokeWidth: 8,
       },
     ]), { canvas, color });
 
@@ -130,10 +132,38 @@ describe('toFabricObjects', () => {
       strokeLineJoin: 'round',
     });
     expect(objects[2]).toMatchObject({ stroke: color, strokeWidth: 3 });
-    expect(objects[3]).toMatchObject({ width: 30, height: 20, angle: 12 });
-    expect(objects[4]).toMatchObject({ radius: 10 });
-    expect(objects[5]).toMatchObject({ rx: 14, ry: 8 });
+    expect(objects[3]).toMatchObject({
+      width: 30,
+      height: 20,
+      angle: 12,
+      strokeWidth: 4,
+      strokeUniform: false,
+    });
+    expect(objects[4]).toMatchObject({
+      radius: 10,
+      strokeWidth: 6,
+      strokeUniform: false,
+    });
+    expect(objects[5]).toMatchObject({
+      rx: 14,
+      ry: 8,
+      strokeWidth: 8,
+      strokeUniform: false,
+    });
     expect(objects[5].angle).toBeCloseTo(-8, 8);
+    const rectRadians = 12 * Math.PI / 180;
+    const rectCenterX = 105
+      + Math.cos(rectRadians) * 15
+      - Math.sin(rectRadians) * 10;
+    const rectCenterY = 5
+      + Math.sin(rectRadians) * 15
+      + Math.cos(rectRadians) * 10;
+    expect(
+      objects[4].getCenterPoint().x - objects[3].getCenterPoint().x,
+    ).toBeCloseTo(155 - rectCenterX, 8);
+    expect(
+      objects[4].getCenterPoint().y - objects[3].getCenterPoint().y,
+    ).toBeCloseTo(15 - rectCenterY, 8);
 
     const ids = objects.map((object) => getFabricMetadata(object).id);
     expect(ids.every(Boolean)).toBe(true);
@@ -167,11 +197,67 @@ describe('toFabricObjects', () => {
     expect(smallObject.scaleY).toBe(1);
   });
 
+  it.each([
+    {
+      name: 'rectangle',
+      shape: {
+        kind: 'rect',
+        x: 1,
+        y: 1,
+        width: 18,
+        height: 18,
+        angle: 0,
+        strokeWidth: 2,
+      } satisfies TracedShape,
+    },
+    {
+      name: 'circle',
+      shape: {
+        kind: 'circle',
+        cx: 10,
+        cy: 10,
+        r: 9,
+        strokeWidth: 2,
+      } satisfies TracedShape,
+    },
+    {
+      name: 'ellipse',
+      shape: {
+        kind: 'ellipse',
+        cx: 10,
+        cy: 10,
+        rx: 9,
+        ry: 4,
+        angle: 0,
+        strokeWidth: 2,
+      } satisfies TracedShape,
+    },
+  ])('keeps an edge-matched $name within the source-based 80% view bounds', ({
+    shape,
+  }) => {
+    const canvas = createCanvas(20, 20);
+    const [object] = toFabricObjects(drawing([shape], 20, 20), { canvas });
+    const bounds = object.getBoundingRect();
+
+    expect(bounds.width).toBeLessThanOrEqual(16 + 1e-8);
+    expect(bounds.height).toBeLessThanOrEqual(16 + 1e-8);
+    expect(object.getCenterPoint().x).toBeCloseTo(10, 8);
+    expect(object.getCenterPoint().y).toBeCloseTo(10, 8);
+  });
+
   it('preserves primitive anchors and scales traced stroke widths with the drawing', () => {
     const canvas = createCanvas(500, 400, [2, 0, 0, 2, -200, -100]);
     const objects = toFabricObjects(drawing([
-      { kind: 'rect', x: 10, y: 20, width: 30, height: 10, angle: 0 },
-      { kind: 'circle', cx: 80, cy: 25, r: 5 },
+      {
+        kind: 'rect',
+        x: 10,
+        y: 20,
+        width: 30,
+        height: 10,
+        angle: 0,
+        strokeWidth: 10,
+      },
+      { kind: 'circle', cx: 80, cy: 25, r: 5, strokeWidth: 10 },
       {
         kind: 'line',
         x1: 0,
@@ -183,16 +269,50 @@ describe('toFabricObjects', () => {
     ], 1_000, 500), { canvas });
     const [rect, circle, line] = objects;
 
-    // Fabric includes uniform primitive strokes in ActiveSelection bounds, so
-    // allow the sub-pixel offset while preserving the source-space relation.
-    expect(circle.getCenterPoint().x - rect.getCenterPoint().x).toBeCloseTo(11, 0);
-    expect(circle.getCenterPoint().y - rect.getCenterPoint().y).toBeCloseTo(0, 0);
-    expect(rect).toMatchObject({ originX: 'left', originY: 'top' });
-    expect(circle).toMatchObject({ originX: 'center', originY: 'center' });
+    expect(circle.getCenterPoint().x - rect.getCenterPoint().x).toBeCloseTo(11, 8);
+    expect(circle.getCenterPoint().y - rect.getCenterPoint().y).toBeCloseTo(0, 8);
+    expect(rect).toMatchObject({
+      originX: 'left',
+      originY: 'top',
+      strokeWidth: 10,
+      strokeUniform: false,
+    });
+    expect(circle).toMatchObject({
+      originX: 'center',
+      originY: 'center',
+      strokeWidth: 10,
+      strokeUniform: false,
+    });
     expect(line).toMatchObject({ strokeWidth: 10, strokeUniform: false });
     expect(line.scaleX).toBeCloseTo(0.2, 8);
     expect(line.scaleY).toBeCloseTo(0.2, 8);
+    expect((rect.strokeWidth ?? 0) * (rect.scaleY ?? 1)).toBeCloseTo(2, 8);
+    expect((circle.strokeWidth ?? 0) * (circle.scaleY ?? 1)).toBeCloseTo(2, 8);
     expect((line.strokeWidth ?? 0) * (line.scaleY ?? 1)).toBeCloseTo(2, 8);
+  });
+
+  it('keeps the version-1 primitive stroke default when width is omitted', () => {
+    const canvas = createCanvas();
+    const objects = toFabricObjects(drawing([
+      { kind: 'rect', x: 5, y: 5, width: 30, height: 20, angle: 0 },
+      { kind: 'circle', cx: 65, cy: 20, r: 12 },
+      {
+        kind: 'ellipse',
+        cx: 100,
+        cy: 20,
+        rx: 15,
+        ry: 8,
+        angle: 0,
+      },
+    ]), { canvas });
+
+    expect(objects).toHaveLength(3);
+    for (const object of objects) {
+      expect(object).toMatchObject({
+        strokeWidth: 2,
+        strokeUniform: false,
+      });
+    }
   });
 
   it('keeps interior polygon rings as an editable even-odd Fabric path', () => {

@@ -17,7 +17,12 @@ import {
   TraceServiceError,
   type TraceJob,
 } from '../services/traceService';
-import type { TracedDrawing, TracedShape } from '../domain/trace/tracedDrawing';
+import {
+  DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+  MIN_TRACED_STROKE_WIDTH,
+  type TracedDrawing,
+  type TracedShape,
+} from '../domain/trace/tracedDrawing';
 import { useEditorStore } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import type { TranslationKeys } from '../i18n/ja';
@@ -28,6 +33,7 @@ import {
   isAcceptedTraceImage,
   TRACE_ACCEPTED_IMAGE_TYPES,
 } from '../utils/traceImageData';
+import { loadCurrentEditorStyle } from '../utils/stylePresets';
 import Dialog from './Dialog';
 
 const DEBOUNCE_MS = 300;
@@ -90,6 +96,12 @@ function previewRingPath(points: readonly { x: number; y: number }[]): string {
   ].join(' ');
 }
 
+function previewStrokeWidth(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) && (value as number) > 0
+    ? Math.max(MIN_TRACED_STROKE_WIDTH, value as number)
+    : fallback;
+}
+
 function previewShape(shape: TracedShape, index: number) {
   const strokeProps = {
     fill: 'none',
@@ -126,7 +138,10 @@ function previewShape(shape: TracedShape, index: number) {
           key={index}
           points={shape.points.map((point) => `${point.x},${point.y}`).join(' ')}
           {...strokeProps}
-          strokeWidth={Math.max(0.5, shape.strokeWidth)}
+          strokeWidth={previewStrokeWidth(
+            shape.strokeWidth,
+            MIN_TRACED_STROKE_WIDTH,
+          )}
         />
       );
     case 'line':
@@ -138,7 +153,10 @@ function previewShape(shape: TracedShape, index: number) {
           x2={shape.x2}
           y2={shape.y2}
           {...strokeProps}
-          strokeWidth={Math.max(0.5, shape.strokeWidth)}
+          strokeWidth={previewStrokeWidth(
+            shape.strokeWidth,
+            MIN_TRACED_STROKE_WIDTH,
+          )}
         />
       );
     case 'rect':
@@ -153,7 +171,10 @@ function previewShape(shape: TracedShape, index: number) {
             ? `rotate(${shape.angle} ${shape.x} ${shape.y})`
             : undefined}
           {...strokeProps}
-          strokeWidth={2}
+          strokeWidth={previewStrokeWidth(
+            shape.strokeWidth,
+            DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+          )}
         />
       );
     case 'circle':
@@ -164,7 +185,10 @@ function previewShape(shape: TracedShape, index: number) {
           cy={shape.cy}
           r={shape.r}
           {...strokeProps}
-          strokeWidth={2}
+          strokeWidth={previewStrokeWidth(
+            shape.strokeWidth,
+            DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+          )}
         />
       );
     case 'ellipse':
@@ -179,7 +203,10 @@ function previewShape(shape: TracedShape, index: number) {
             ? `rotate(${shape.angle} ${shape.cx} ${shape.cy})`
             : undefined}
           {...strokeProps}
-          strokeWidth={2}
+          strokeWidth={previewStrokeWidth(
+            shape.strokeWidth,
+            DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+          )}
         />
       );
   }
@@ -210,6 +237,10 @@ export default function TraceDialog({ sourceImage, onClose }: TraceDialogProps) 
   const [stage, setStage] = useState<TraceProgressStage>('preprocess');
   const [errorKey, setErrorKey] = useState<TranslationKeys | null>(null);
   const [dragging, setDragging] = useState(false);
+  const traceColor = useMemo(
+    () => loadCurrentEditorStyle('line').stroke || '#111827',
+    [],
+  );
 
   const cancelActiveJob = useCallback(() => {
     traceGenerationRef.current += 1;
@@ -255,14 +286,23 @@ export default function TraceDialog({ sourceImage, onClose }: TraceDialogProps) 
 
   useEffect(() => {
     if (!sourceImage) return;
+    const token = ++decodeTokenRef.current;
+    cancelActiveJob();
+    setDecoding(false);
+    setProcessing(false);
+    setDrawing(null);
     try {
-      setImageData(fabricImageToImageData(sourceImage));
+      const decoded = fabricImageToImageData(sourceImage);
+      if (decodeTokenRef.current !== token) return;
+      setImageData(decoded);
       setSourceName('');
       setErrorKey(null);
     } catch {
+      if (decodeTokenRef.current !== token) return;
+      setImageData(null);
       setErrorKey('traceImageReadError');
     }
-  }, [sourceImage]);
+  }, [cancelActiveJob, sourceImage]);
 
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
@@ -349,7 +389,10 @@ export default function TraceDialog({ sourceImage, onClose }: TraceDialogProps) 
   const insert = () => {
     if (!drawing || !canvas) return;
     try {
-      const objects = insertTracedDrawing(drawing, { group: groupResult });
+      const objects = insertTracedDrawing(drawing, {
+        group: groupResult,
+        color: traceColor,
+      });
       if (objects.length === 0) {
         setErrorKey('traceNoShapes');
         return;
@@ -442,7 +485,7 @@ export default function TraceDialog({ sourceImage, onClose }: TraceDialogProps) 
             </div>
           ) : (
             <>
-              <div className="trace-preview">
+              <div className="trace-preview" style={{ color: traceColor }}>
                 {drawing ? (
                   <svg
                     role="img"
@@ -571,6 +614,40 @@ export default function TraceDialog({ sourceImage, onClose }: TraceDialogProps) 
               )}
             />
           </label>
+
+          {options.mode === 'cleanup' && (
+            <>
+              <label>
+                <span>{t('traceAngleSnap')}: {options.angleSnapDeg.toFixed(1)}°</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={22.5}
+                  step={0.5}
+                  value={options.angleSnapDeg}
+                  onChange={(event) => updateOption(
+                    'angleSnapDeg',
+                    Number(event.target.value),
+                  )}
+                />
+              </label>
+
+              <label>
+                <span>{t('traceCoordinateSnap')}: {options.coordinateSnap.toFixed(1)}px</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={10}
+                  step={0.5}
+                  value={options.coordinateSnap}
+                  onChange={(event) => updateOption(
+                    'coordinateSnap',
+                    Number(event.target.value),
+                  )}
+                />
+              </label>
+            </>
+          )}
 
           <label>
             <span>{t('traceMaxDimension')}</span>

@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { alignShapes, snapAngle } from './align';
 import type { TracedShape } from './tracedDrawing';
 
+function rectCenter(
+  shape: Extract<TracedShape, { kind: 'rect' }>,
+): { x: number; y: number } {
+  const radians = shape.angle * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: shape.x + cos * shape.width / 2 - sin * shape.height / 2,
+    y: shape.y + sin * shape.width / 2 + cos * shape.height / 2,
+  };
+}
+
 describe('cleanup alignment', () => {
   it('snaps only angles inside the requested tolerance', () => {
     expect(snapAngle(43, 3)).toBe(45);
@@ -60,6 +72,118 @@ describe('cleanup alignment', () => {
       x2: 10,
       y2: 20,
       strokeWidth: 1,
+    });
+  });
+
+  it('preserves the geometric center of a large rotated rectangle when snapping', () => {
+    const rectangle: Extract<TracedShape, { kind: 'rect' }> = {
+      kind: 'rect',
+      x: 125_000,
+      y: 300_000,
+      width: 250_000,
+      height: 125_000,
+      angle: 43,
+      strokeWidth: 7.5,
+    };
+    const before = rectCenter(rectangle);
+    const [result] = alignShapes([rectangle], {
+      angleSnapDeg: 3,
+      coordinateSnap: 0,
+    });
+
+    expect(result.kind).toBe('rect');
+    if (result.kind === 'rect') {
+      const after = rectCenter(result);
+      expect(result.angle).toBe(45);
+      expect(result.x).not.toBe(rectangle.x);
+      expect(result.y).not.toBe(rectangle.y);
+      expect(after.x).toBeCloseTo(before.x, 8);
+      expect(after.y).toBeCloseTo(before.y, 8);
+      expect(result.width).toBe(rectangle.width);
+      expect(result.height).toBe(rectangle.height);
+      expect(result.strokeWidth).toBe(7.5);
+    }
+  });
+
+  it('keeps an ellipse center fixed while snapping only its angle', () => {
+    const ellipse: Extract<TracedShape, { kind: 'ellipse' }> = {
+      kind: 'ellipse',
+      cx: 123_456,
+      cy: 654_321,
+      rx: 20_000,
+      ry: 5_000,
+      angle: 43,
+    };
+    const [result] = alignShapes([ellipse], {
+      angleSnapDeg: 3,
+      coordinateSnap: 0,
+    });
+    expect(result).toEqual({ ...ellipse, angle: 45 });
+  });
+
+  it('writes clustered coordinates back to explicit slices for mixed rectangles', () => {
+    const input: TracedShape[] = [
+      {
+        kind: 'rect',
+        x: 10,
+        y: 10,
+        width: 20,
+        height: 20,
+        angle: 0,
+      },
+      {
+        kind: 'rect',
+        x: 12,
+        y: 50,
+        width: 15,
+        height: 8,
+        angle: 45,
+      },
+      {
+        kind: 'line',
+        x1: 14,
+        y1: 70,
+        x2: 14,
+        y2: 90,
+        strokeWidth: 2,
+      },
+    ];
+
+    const result = alignShapes(input, {
+      angleSnapDeg: 0,
+      coordinateSnap: 3,
+    });
+    expect(result[0]).toEqual({
+      kind: 'rect',
+      x: 12.5,
+      y: 10,
+      width: 17.5,
+      height: 20,
+      angle: 0,
+    });
+    expect(result[1]).toEqual({
+      kind: 'rect',
+      x: 12.5,
+      y: 50,
+      width: 15,
+      height: 8,
+      angle: 45,
+    });
+    expect(result[2]).toEqual({
+      kind: 'line',
+      x1: 12.5,
+      y1: 70,
+      x2: 12.5,
+      y2: 90,
+      strokeWidth: 2,
+    });
+    expect(input[0]).toEqual({
+      kind: 'rect',
+      x: 10,
+      y: 10,
+      width: 20,
+      height: 20,
+      angle: 0,
     });
   });
 

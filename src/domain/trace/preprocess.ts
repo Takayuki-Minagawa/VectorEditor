@@ -201,8 +201,10 @@ export function binarizeOtsu(
   return binarizeFixed(image, threshold);
 }
 
+type IntegralImage = Uint32Array | Float64Array;
+
 function rectangleSum(
-  integral: Float64Array,
+  integral: IntegralImage,
   stride: number,
   x0: number,
   y0: number,
@@ -232,7 +234,21 @@ export function binarizeSauvola(
     ? options.dynamicRange as number
     : 128;
   const stride = image.width + 1;
-  const integral = new Float64Array((image.width + 1) * (image.height + 1));
+  const integralLength = stride * (image.height + 1);
+  const maximumLuminanceSum = image.data.length * 255;
+  const maximumSquaredLuminanceSum = image.data.length * 255 * 255;
+  if (
+    !Number.isSafeInteger(integralLength)
+    || !Number.isSafeInteger(maximumSquaredLuminanceSum)
+  ) {
+    throw new RangeError('Image dimensions exceed the safe integral-image range.');
+  }
+  // The trace UI is capped at 3000×3000, where the maximum luminance sum is
+  // 2.295e9. Keep a Float64 fallback so this pure helper preserves correctness
+  // for larger callers instead of silently overflowing Uint32.
+  const integral: IntegralImage = maximumLuminanceSum <= 0xffff_ffff
+    ? new Uint32Array(integralLength)
+    : new Float64Array(integralLength);
   const squaredIntegral = new Float64Array(integral.length);
 
   for (let y = 1; y <= image.height; y += 1) {

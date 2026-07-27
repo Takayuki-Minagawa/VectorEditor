@@ -18,17 +18,24 @@ function foregroundAt(
   return data[y * width + x] === 0 ? 0 : 1;
 }
 
-function transitionCount(neighbours: readonly number[]): number {
-  let transitions = 0;
-  for (let index = 0; index < neighbours.length; index += 1) {
-    if (
-      neighbours[index] === 0
-      && neighbours[(index + 1) % neighbours.length] === 1
-    ) {
-      transitions += 1;
-    }
-  }
-  return transitions;
+function transitionCount(
+  p2: number,
+  p3: number,
+  p4: number,
+  p5: number,
+  p6: number,
+  p7: number,
+  p8: number,
+  p9: number,
+): number {
+  return (p2 === 0 && p3 === 1 ? 1 : 0)
+    + (p3 === 0 && p4 === 1 ? 1 : 0)
+    + (p4 === 0 && p5 === 1 ? 1 : 0)
+    + (p5 === 0 && p6 === 1 ? 1 : 0)
+    + (p6 === 0 && p7 === 1 ? 1 : 0)
+    + (p7 === 0 && p8 === 1 ? 1 : 0)
+    + (p8 === 0 && p9 === 1 ? 1 : 0)
+    + (p9 === 0 && p2 === 1 ? 1 : 0);
 }
 
 function thinningSubiteration(
@@ -36,8 +43,9 @@ function thinningSubiteration(
   width: number,
   height: number,
   second: boolean,
+  remove: Uint8Array,
 ): boolean {
-  const remove = new Uint8Array(data.length);
+  remove.fill(0);
   let changed = false;
 
   for (let y = 0; y < height; y += 1) {
@@ -53,9 +61,12 @@ function thinningSubiteration(
       const p7 = foregroundAt(data, width, height, x - 1, y + 1);
       const p8 = foregroundAt(data, width, height, x - 1, y);
       const p9 = foregroundAt(data, width, height, x - 1, y - 1);
-      const neighbours = [p2, p3, p4, p5, p6, p7, p8, p9];
-      const count = neighbours.reduce((sum, value) => sum + value, 0);
-      if (count < 2 || count > 6 || transitionCount(neighbours) !== 1) {
+      const count = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+      if (
+        count < 2
+        || count > 6
+        || transitionCount(p2, p3, p4, p5, p6, p7, p8, p9) !== 1
+      ) {
         continue;
       }
 
@@ -84,6 +95,7 @@ function thinningSubiteration(
 export function zhangSuenThinning(image: BinaryImage): BinaryImage {
   assertBinaryImage(image);
   const data = Uint8Array.from(image.data, (value) => value === 0 ? 0 : 1);
+  const remove = new Uint8Array(data.length);
   let changed = true;
   while (changed) {
     const firstChanged = thinningSubiteration(
@@ -91,12 +103,14 @@ export function zhangSuenThinning(image: BinaryImage): BinaryImage {
       image.width,
       image.height,
       false,
+      remove,
     );
     const secondChanged = thinningSubiteration(
       data,
       image.width,
       image.height,
       true,
+      remove,
     );
     changed = firstChanged || secondChanged;
   }
@@ -145,8 +159,25 @@ function skeletonNeighbours(image: BinaryImage, index: number): number[] {
   return neighbours;
 }
 
-function edgeKey(left: number, right: number): string {
-  return left < right ? `${left}:${right}` : `${right}:${left}`;
+type EdgeKey = number | string;
+
+function createEdgeKey(pixelCount: number): (left: number, right: number) => EdgeKey {
+  if (!Number.isSafeInteger(pixelCount) || pixelCount <= 0) {
+    throw new RangeError('Skeleton pixel count must be a positive safe integer.');
+  }
+  // base-N encoding is collision-free while N² - 1 is a safe integer. Keep
+  // the old string representation as a correctness fallback for larger callers.
+  const numericKeysAreSafe = pixelCount
+    <= Math.floor(Math.sqrt(Number.MAX_SAFE_INTEGER));
+  return numericKeysAreSafe
+    ? (left, right) => {
+      const minimum = Math.min(left, right);
+      const maximum = Math.max(left, right);
+      return minimum * pixelCount + maximum;
+    }
+    : (left, right) => (
+      left < right ? `${left}:${right}` : `${right}:${left}`
+    );
 }
 
 function distanceToBackground(image: BinaryImage): Float64Array {
@@ -272,7 +303,8 @@ export function extractCenterlines(
     }
   }
   const distances = source ? distanceToBackground(source) : undefined;
-  const visitedEdges = new Set<string>();
+  const edgeKey = createEdgeKey(skeleton.data.length);
+  const visitedEdges = new Set<EdgeKey>();
   const lines: Centerline[] = [];
   const degree = (index: number): number => neighbours.get(index)?.length ?? 0;
 

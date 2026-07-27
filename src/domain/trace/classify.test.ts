@@ -43,6 +43,7 @@ describe('cleanup geometry classification', () => {
     expect(result.kind).toBe('rect');
     if (result.kind === 'rect') {
       expect(result.width * result.height).toBeGreaterThan(190);
+      expect(result.strokeWidth).toBe(2);
     }
   });
 
@@ -54,21 +55,26 @@ describe('cleanup geometry classification', () => {
         y: 20 + (point.y - 20) * scale,
       };
     });
-    const result = classifyShape(points);
+    const result = classifyShape(points, { strokeWidth: 5.25 });
     expect(result.kind).toBe('circle');
     if (result.kind === 'circle') {
       expect(result.cx).toBeCloseTo(20, 1);
       expect(result.r).toBeCloseTo(10, 0);
+      expect(result.strokeWidth).toBe(5.25);
     }
   });
 
   it('recognizes a rotated ellipse and retains its orientation', () => {
-    const result = classifyShape(ellipsePoints(30, 20, 12, 5, 30));
+    const result = classifyShape(
+      ellipsePoints(30, 20, 12, 5, 30),
+      { strokeWidth: 3.5 },
+    );
     expect(result.kind).toBe('ellipse');
     if (result.kind === 'ellipse') {
       expect(Math.max(result.rx, result.ry)).toBeCloseTo(12, 0);
       expect(Math.min(result.rx, result.ry)).toBeCloseTo(5, 0);
       expect(Math.abs(result.angle)).toBeGreaterThan(20);
+      expect(result.strokeWidth).toBe(3.5);
     }
   });
 
@@ -99,6 +105,18 @@ describe('cleanup geometry classification', () => {
       { x: 0, y: 10 },
     ]);
     expect(result.kind).toBe('polygon');
+  });
+
+  it('rejects invalid classification stroke widths', () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+    expect(() => classifyShape(points, { strokeWidth: 0 })).toThrow(RangeError);
+    expect(() => classifyShape(points, { strokeWidth: Number.NaN }))
+      .toThrow(RangeError);
   });
 
   it('computes stable geometric features and rotated bounds', () => {

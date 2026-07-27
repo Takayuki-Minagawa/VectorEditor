@@ -72,11 +72,82 @@ describe('traced drawing domain', () => {
     })).toThrow(TracedDrawingValidationError);
   });
 
+  it('accepts legacy primitives and validates optional measured stroke widths', () => {
+    const measured: TracedDrawing = {
+      version: 1,
+      sourceWidth: 100,
+      sourceHeight: 100,
+      shapes: [
+        {
+          kind: 'rect',
+          x: 10,
+          y: 10,
+          width: 20,
+          height: 10,
+          angle: 0,
+          strokeWidth: 0.5,
+        },
+        { kind: 'circle', cx: 50, cy: 30, r: 10, strokeWidth: 4 },
+        {
+          kind: 'ellipse',
+          cx: 70,
+          cy: 70,
+          rx: 12,
+          ry: 6,
+          angle: 15,
+          strokeWidth: 6,
+        },
+      ],
+      stats: { componentCount: 3, vertexCount: 12, droppedCount: 0 },
+    };
+    expect(validateTracedDrawing(measured)).toEqual({ valid: true, issues: [] });
+    // Existing version-1 payloads omit primitive strokeWidth and remain valid.
+    expect(validateTracedDrawing(validDrawing)).toEqual({ valid: true, issues: [] });
+
+    const invalid = validateTracedDrawing({
+      ...measured,
+      shapes: [
+        { ...measured.shapes[0], strokeWidth: 0 },
+        { ...measured.shapes[1], strokeWidth: Number.NaN },
+        { ...measured.shapes[2], strokeWidth: Number.POSITIVE_INFINITY },
+      ],
+    });
+    expect(invalid.issues.filter(
+      (issue) => issue.code === 'invalid-stroke-width',
+    )).toHaveLength(3);
+  });
+
   it('enforces a configurable aggregate vertex limit', () => {
     const result = validateTracedDrawing(validDrawing, 5);
     expect(result.valid).toBe(false);
     expect(result.issues).toContainEqual(expect.objectContaining({
       code: 'vertex-limit-exceeded',
+    }));
+  });
+
+  it('requires reported vertex statistics to match the measured safe count', () => {
+    const mismatched = validateTracedDrawing({
+      ...validDrawing,
+      stats: {
+        ...validDrawing.stats,
+        vertexCount: validDrawing.stats.vertexCount - 1,
+      },
+    });
+    expect(mismatched.issues).toContainEqual(expect.objectContaining({
+      code: 'invalid-stats',
+      message: expect.stringContaining('drawing contains 19'),
+    }));
+
+    const unsafe = validateTracedDrawing({
+      ...validDrawing,
+      stats: {
+        ...validDrawing.stats,
+        componentCount: Number.MAX_SAFE_INTEGER + 1,
+      },
+    });
+    expect(unsafe.issues).toContainEqual(expect.objectContaining({
+      code: 'invalid-stats',
+      message: expect.stringContaining('safe integer'),
     }));
   });
 

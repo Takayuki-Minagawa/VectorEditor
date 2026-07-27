@@ -7,6 +7,8 @@
 
 export const TRACED_DRAWING_VERSION = 1 as const;
 export const MAX_TRACED_VERTICES = 250_000;
+export const MIN_TRACED_STROKE_WIDTH = 0.5;
+export const DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH = 2;
 
 export interface TracedPoint {
   x: number;
@@ -37,8 +39,17 @@ export type TracedShape =
     width: number;
     height: number;
     angle: number;
+    /** Measured outline width. Omitted legacy values render as 2px. */
+    strokeWidth?: number;
   }
-  | { kind: 'circle'; cx: number; cy: number; r: number }
+  | {
+    kind: 'circle';
+    cx: number;
+    cy: number;
+    r: number;
+    /** Measured outline width. Omitted legacy values render as 2px. */
+    strokeWidth?: number;
+  }
   | {
     kind: 'ellipse';
     cx: number;
@@ -46,6 +57,8 @@ export type TracedShape =
     rx: number;
     ry: number;
     angle: number;
+    /** Measured outline width. Omitted legacy values render as 2px. */
+    strokeWidth?: number;
   };
 
 export interface TracedDrawingStats {
@@ -263,6 +276,12 @@ function isNonNegativeInteger(value: unknown): value is number {
   return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isSafeInteger(value)
+    && value >= 0;
+}
+
 function validatePoint(
   value: unknown,
   sourceWidth: number,
@@ -316,6 +335,21 @@ function validatePositive(
     return false;
   }
   return true;
+}
+
+function validateOptionalStrokeWidth(
+  value: unknown,
+  shapeIndex: number,
+  issues: TracedDrawingValidationIssue[],
+): void {
+  if (value === undefined) return;
+  validatePositive(
+    value,
+    'invalid-stroke-width',
+    'stroke width',
+    shapeIndex,
+    issues,
+  );
 }
 
 function validateAnchor(
@@ -544,6 +578,7 @@ function validateShape(
           });
         }
       }
+      validateOptionalStrokeWidth(value.strokeWidth, shapeIndex, issues);
       return 4;
     case 'circle':
       validateAnchor(
@@ -576,6 +611,7 @@ function validateShape(
           );
         });
       }
+      validateOptionalStrokeWidth(value.strokeWidth, shapeIndex, issues);
       return 4;
     case 'ellipse':
       validateAnchor(
@@ -638,6 +674,7 @@ function validateShape(
           });
         }
       }
+      validateOptionalStrokeWidth(value.strokeWidth, shapeIndex, issues);
       return 4;
     default:
       issues.push({
@@ -711,21 +748,27 @@ export function validateTracedDrawing(
     });
   }
 
+  const stats = value.stats;
   if (
-    !isRecord(value.stats)
-    || !Number.isInteger(value.stats.componentCount)
-    || !isFiniteNumber(value.stats.componentCount)
-    || value.stats.componentCount < 0
-    || !Number.isInteger(value.stats.vertexCount)
-    || !isFiniteNumber(value.stats.vertexCount)
-    || value.stats.vertexCount < 0
-    || !Number.isInteger(value.stats.droppedCount)
-    || !isFiniteNumber(value.stats.droppedCount)
-    || value.stats.droppedCount < 0
+    !isRecord(stats)
+    || !isNonNegativeSafeInteger(stats.componentCount)
+    || !isNonNegativeSafeInteger(stats.vertexCount)
+    || !isNonNegativeSafeInteger(stats.droppedCount)
   ) {
     issues.push({
       code: 'invalid-stats',
-      message: 'Trace statistics must contain non-negative integer counts.',
+      message: 'Trace statistics must contain non-negative safe integer counts.',
+    });
+  } else if (
+    Array.isArray(value.shapes)
+    && stats.vertexCount !== vertexCount
+  ) {
+    issues.push({
+      code: 'invalid-stats',
+      message: (
+        `Trace statistics report ${stats.vertexCount} vertices, `
+        + `but the drawing contains ${vertexCount}.`
+      ),
     });
   }
 

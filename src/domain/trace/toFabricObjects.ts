@@ -1,7 +1,12 @@
 import * as fabric from 'fabric';
 import { reassignObjectIdsRecursive } from '../../utils/objectIds';
 import { releaseActiveSelectionObjects } from '../../utils/fabricObjectTree';
-import type { TracedDrawing, TracedShape } from './tracedDrawing';
+import {
+  DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+  MIN_TRACED_STROKE_WIDTH,
+  type TracedDrawing,
+  type TracedShape,
+} from './tracedDrawing';
 
 export interface ToFabricObjectsOptions {
   canvas: fabric.Canvas;
@@ -18,6 +23,12 @@ function ringPath(points: readonly { x: number; y: number }[]): string {
   ].join(' ');
 }
 
+function renderStrokeWidth(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) && (value as number) > 0
+    ? Math.max(MIN_TRACED_STROKE_WIDTH, value as number)
+    : fallback;
+}
+
 function shapeToFabricObject(
   shape: TracedShape,
   color: string,
@@ -27,6 +38,7 @@ function shapeToFabricObject(
     stroke: color,
     strokeLineCap: 'round' as const,
     strokeLineJoin: 'round' as const,
+    strokeUniform: false,
   };
 
   switch (shape.kind) {
@@ -53,26 +65,42 @@ function shapeToFabricObject(
     case 'polyline':
       return new fabric.Polyline(shape.points, {
         ...lineStyle,
-        strokeWidth: Math.max(0.5, shape.strokeWidth),
+        strokeWidth: renderStrokeWidth(
+          shape.strokeWidth,
+          MIN_TRACED_STROKE_WIDTH,
+        ),
       });
     case 'line':
       return new fabric.Line([shape.x1, shape.y1, shape.x2, shape.y2], {
         ...lineStyle,
-        strokeWidth: Math.max(0.5, shape.strokeWidth),
+        strokeWidth: renderStrokeWidth(
+          shape.strokeWidth,
+          MIN_TRACED_STROKE_WIDTH,
+        ),
       });
-    case 'rect':
+    case 'rect': {
+      const strokeWidth = renderStrokeWidth(
+        shape.strokeWidth,
+        DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+      );
+      // Fabric's left/top rect origin is the stroke-inclusive outer corner,
+      // while traced x/y and SVG rect x/y describe the stroke centreline.
+      const halfStrokeWidth = strokeWidth / 2;
+      const radians = shape.angle * Math.PI / 180;
+      const cos = Math.cos(radians);
+      const sin = Math.sin(radians);
       return new fabric.Rect({
-        left: shape.x,
-        top: shape.y,
+        left: shape.x - halfStrokeWidth * (cos - sin),
+        top: shape.y - halfStrokeWidth * (sin + cos),
         originX: 'left',
         originY: 'top',
         width: shape.width,
         height: shape.height,
         angle: shape.angle,
         ...lineStyle,
-        strokeWidth: 2,
-        strokeUniform: true,
+        strokeWidth,
       });
+    }
     case 'circle':
       return new fabric.Circle({
         left: shape.cx,
@@ -81,8 +109,10 @@ function shapeToFabricObject(
         originY: 'center',
         radius: shape.r,
         ...lineStyle,
-        strokeWidth: 2,
-        strokeUniform: true,
+        strokeWidth: renderStrokeWidth(
+          shape.strokeWidth,
+          DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+        ),
       });
     case 'ellipse':
       return new fabric.Ellipse({
@@ -94,8 +124,10 @@ function shapeToFabricObject(
         ry: shape.ry,
         angle: shape.angle,
         ...lineStyle,
-        strokeWidth: 2,
-        strokeUniform: true,
+        strokeWidth: renderStrokeWidth(
+          shape.strokeWidth,
+          DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+        ),
       });
   }
 }

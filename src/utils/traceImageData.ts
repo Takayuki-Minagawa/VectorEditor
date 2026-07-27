@@ -8,6 +8,9 @@ export const TRACE_ACCEPTED_IMAGE_TYPES = [
 ] as const;
 
 export const TRACE_DECODE_MAX_DIMENSION = 3_000;
+// Independent allocation guard for every ImageData-producing path. The
+// current 3000px decode cap reaches at most 9M pixels, while this separate
+// ceiling also protects future callers if their dimension policy changes.
 const MAX_SOURCE_PIXELS = 16_000_000;
 const ACCEPTED_TYPE_SET = new Set<string>(TRACE_ACCEPTED_IMAGE_TYPES);
 

@@ -205,8 +205,20 @@ interface BoundaryEdgeBudget {
   maximum: number;
 }
 
-function vertexKey(x: number, y: number): string {
-  return `${x},${y}`;
+type VertexKey = number | string;
+
+function createVertexKey(
+  width: number,
+  height: number,
+): (x: number, y: number) => VertexKey {
+  const stride = width + 1;
+  const maximumKey = height * stride + width;
+  // Pixel-boundary vertices span 0..width and 0..height. Use a compact numeric
+  // key whenever the full range is exact, with the previous string key as a
+  // correctness fallback for dimensions beyond Number's safe integer range.
+  return Number.isSafeInteger(maximumKey)
+    ? (x, y) => y * stride + x
+    : (x, y) => `${x},${y}`;
 }
 
 function signedPolygonArea(points: readonly TracedPoint[]): number {
@@ -238,8 +250,11 @@ function directionPreference(
   }
 }
 
-function traceBoundaryCycles(edges: readonly BoundaryEdge[]): TracedPoint[][] {
-  const outgoing = new Map<string, number[]>();
+function traceBoundaryCycles(
+  edges: readonly BoundaryEdge[],
+  vertexKey: (x: number, y: number) => VertexKey,
+): TracedPoint[][] {
+  const outgoing = new Map<VertexKey, number[]>();
   edges.forEach((edge, index) => {
     const key = vertexKey(edge.x1, edge.y1);
     const entries = outgoing.get(key);
@@ -416,8 +431,12 @@ export function extractContours(
   }
 
   const contours: Contour[] = [];
+  const vertexKey = createVertexKey(image.width, image.height);
   for (const component of labeling.components) {
-    const cycles = traceBoundaryCycles(edgesByComponent.get(component.id) ?? []);
+    const cycles = traceBoundaryCycles(
+      edgesByComponent.get(component.id) ?? [],
+      vertexKey,
+    );
     for (const points of cycles) {
       const signedArea = signedPolygonArea(points);
       if (signedArea === 0) continue;

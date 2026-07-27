@@ -1,5 +1,9 @@
 import type { Contour } from './contour';
-import type { TracedPoint, TracedShape } from './tracedDrawing';
+import {
+  DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
+  type TracedPoint,
+  type TracedShape,
+} from './tracedDrawing';
 import { squaredDistanceToSegment } from './simplify';
 
 export interface OrientedBounds {
@@ -37,7 +41,7 @@ export interface ClassificationOptions {
 
 const DEFAULT_CLASSIFICATION_OPTIONS: Required<ClassificationOptions> = {
   closed: true,
-  strokeWidth: 1,
+  strokeWidth: DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
   lineAspectRatio: 6,
   lineStraightness: 0.08,
   rectangleFillRatio: 0.78,
@@ -395,6 +399,12 @@ export function classifyShape(
   input: readonly TracedPoint[],
   requested: ClassificationOptions = {},
 ): TracedShape {
+  if (
+    requested.strokeWidth !== undefined
+    && (!Number.isFinite(requested.strokeWidth) || requested.strokeWidth <= 0)
+  ) {
+    throw new RangeError('Classification stroke width must be positive and finite.');
+  }
   const options = { ...DEFAULT_CLASSIFICATION_OPTIONS, ...requested };
   const points = copyDistinctPoints(input);
   if (points.length < 2) {
@@ -426,6 +436,7 @@ export function classifyShape(
       cx: features.centroid.x,
       cy: features.centroid.y,
       r: Math.sqrt(features.area / Math.PI),
+      strokeWidth: options.strokeWidth,
     };
   }
 
@@ -442,6 +453,7 @@ export function classifyShape(
       rx: bounds.width / 2,
       ry: bounds.height / 2,
       angle: bounds.angle,
+      strokeWidth: options.strokeWidth,
     };
   }
 
@@ -456,6 +468,7 @@ export function classifyShape(
       width: bounds.width,
       height: bounds.height,
       angle: bounds.angle,
+      strokeWidth: options.strokeWidth,
     };
   }
 

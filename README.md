@@ -85,7 +85,7 @@ Raster images and handwritten notes can be converted into editable vector object
 
 - Start from the toolbar or command palette, then drop or choose a PNG/JPEG/WebP/GIF image, or paste an image into the vectorization dialog with `Ctrl/⌘+V`
 - An existing raster object on the canvas can be sent to the same dialog from its context menu
-- **Faithful trace** preserves contours and handwriting as polygons/polylines; **Cleanup** recognizes line-, rectangle-, circle-, and ellipse-like geometry and aligns nearby angles and coordinates
+- **Faithful trace** preserves contours and handwriting as polygons/polylines; **Cleanup** recognizes line-, rectangle-, circle-, and ellipse-like geometry and aligns nearby angles and coordinates with adjustable snap strengths
 - Otsu thresholding handles relatively even backgrounds, while local Sauvola thresholding is available for photographed paper with shadows or uneven lighting
 - Noise removal, simplification, processing-size, and automatic-threshold controls let the result and vertex count be tuned before insertion
 - Thin elongated components are automatically represented by their centreline and stroke width; “Import as line art” forces centreline tracing for all suitable components
