@@ -220,6 +220,11 @@ e2e/                       Playwright scenarios
 
 The trace domain stages, intermediate-data validation, Fabric conversion, Worker protocol/service, and insertion history are covered by Vitest. Playwright scenarios exercise image input, preview, insertion, and single-step Undo through the browser UI.
 
+## Documentation
+
+- [SECTION_PROPERTIES.md](./SECTION_PROPERTIES.md) — section profile specification: scope, coordinate/unit/sign conventions, geometry pipeline, property formulas, and numerical tolerances (Japanese)
+- [追加機能.md](./追加機能.md) — feature implementation status and backlog (Japanese)
+
 ## Changelog
 
 ### Unreleased
