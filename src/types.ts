@@ -1,5 +1,6 @@
 export type ToolType =
   | 'select'
+  | 'nodeEdit'
   | 'line'
   | 'arrow'
   | 'rect'

@@ -12,7 +12,26 @@ import {
 } from '../utils/objectIds';
 import { releaseActiveSelectionObjects } from '../utils/fabricObjectTree';
 import { disposeAll } from '../utils/disposers';
-import { createAsyncCanvasMutationGuard } from '../utils/canvasCommands';
+import {
+  createAsyncCanvasMutationGuard,
+  executeCanvasTransaction,
+} from '../utils/canvasCommands';
+import {
+  attachNodeEditControls,
+  convertLineToPolylineWithNode,
+  deletePathNode,
+  deletePolylineNode,
+  detachNodeEditControls,
+  findNodeAtScenePoint,
+  hasNodeEditControls,
+  insertPathNode,
+  insertPolylineNode,
+  isNodeEditableObject,
+  refreshNodeEditControls,
+  remapLineAnchorsToPolyline,
+  retargetVertexAnchorsAfterDelete,
+  shiftVertexAnchorsAfterInsert,
+} from '../utils/nodeEditing';
 import { applyOrtho, ORTHO_TOOLS, snapVal } from '../utils/drawingGeometry';
 import {
   applyObjectDefaults as applyDefaults,
@@ -601,7 +620,7 @@ export default function Canvas() {
         return;
       }
 
-      if (activeTool === 'select' || activeTool === 'pencil') return;
+      if (activeTool === 'select' || activeTool === 'nodeEdit' || activeTool === 'pencil') return;
       const rawPointer = canvas.getScenePoint(opt.e);
       const resolved = resolveDrawingPoint(canvas, rawPointer);
       const pointer = resolved.point;
@@ -688,7 +707,7 @@ export default function Canvas() {
 
       const session = sessionRef.current;
       if (session.kind === 'idle') {
-        if (activeTool !== 'select' && activeTool !== 'pencil') {
+        if (activeTool !== 'select' && activeTool !== 'nodeEdit' && activeTool !== 'pencil') {
           resolveDrawingPoint(canvas, cursorPoint);
           canvas.requestRenderAll();
         } else {
@@ -900,6 +919,131 @@ export default function Canvas() {
     scheduleCursorPosition,
     clearCursorPosition,
   ]);
+
+  // Node edit tool: per-node drag handles plus double-click insert/delete.
+  // Double-clicking a segment inserts a node (a line becomes a polyline, curve
+  // segments are de Casteljau split so the shape is unchanged); double-clicking
+  // an existing node deletes it.
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || activeTool !== 'nodeEdit') return;
+
+    const snapNodePointer = (point: { x: number; y: number }) => {
+      const { snapToGrid: snapping, gridSize: grid } = useEditorStore.getState();
+      return snapping
+        ? { x: snapVal(point.x, grid), y: snapVal(point.y, grid) }
+        : point;
+    };
+
+    const syncNodeControls = () => {
+      const active = canvas.getActiveObject();
+      canvas.getObjects().forEach((obj) => {
+        if (obj !== active) detachNodeEditControls(obj);
+      });
+      if (active && isNodeEditableObject(active)) {
+        attachNodeEditControls(active, snapNodePointer);
+      }
+      canvas.requestRenderAll();
+    };
+
+    const handleNodeDblClick = (opt: fabric.TPointerEventInfo) => {
+      const active = canvas.getActiveObject();
+      if (!active || !isNodeEditableObject(active)) return;
+      const scenePoint = canvas.getScenePoint(opt.e);
+      const tolerance = 12 / Math.max(canvas.getZoom(), 0.001);
+      const id = ensureObjectId(active);
+      const { showToast } = useEditorStore.getState();
+
+      const nodeRef = findNodeAtScenePoint(active, scenePoint, tolerance * 0.75);
+      if (nodeRef) {
+        const deleted = executeCanvasTransaction(
+          { canvas, pushHistory },
+          () => {
+            if (nodeRef.type === 'poly' && active instanceof fabric.Polyline) {
+              if (!deletePolylineNode(active, nodeRef.index)) return false;
+              retargetVertexAnchorsAfterDelete(canvas, id, nodeRef.index);
+            } else if (nodeRef.type === 'path' && active instanceof fabric.Path) {
+              if (!deletePathNode(active, nodeRef.commandIndex)) return false;
+            } else {
+              // A plain line always keeps both endpoints.
+              return false;
+            }
+            refreshNodeEditControls(active, snapNodePointer);
+            return true;
+          },
+          { semanticUpdate: [id] },
+        );
+        if (deleted) showToast(t('nodeDeleteDone'), 'success');
+        else showToast(t('nodeDeleteMinPoints'), 'error');
+        return;
+      }
+
+      if (active instanceof fabric.Line) {
+        const replacement = convertLineToPolylineWithNode(active, scenePoint, tolerance);
+        if (!replacement) return;
+        executeCanvasTransaction(
+          { canvas, pushHistory },
+          () => {
+            detachNodeEditControls(active);
+            const stackIndex = canvas.getObjects().indexOf(active);
+            canvas.remove(active);
+            canvas.insertAt(stackIndex, replacement);
+            remapLineAnchorsToPolyline(canvas, id, replacement.points.length - 1);
+            canvas.setActiveObject(replacement);
+            return true;
+          },
+          { semanticUpdate: [id] },
+        );
+        showToast(t('nodeInsertDone'), 'success');
+        return;
+      }
+
+      const inserted = executeCanvasTransaction(
+        { canvas, pushHistory },
+        () => {
+          if (active instanceof fabric.Polyline) {
+            const insertedIndex = insertPolylineNode(active, scenePoint, tolerance);
+            if (insertedIndex === null) return false;
+            shiftVertexAnchorsAfterInsert(canvas, id, insertedIndex);
+          } else if (insertPathNode(active, scenePoint, tolerance) === null) {
+            return false;
+          }
+          refreshNodeEditControls(active, snapNodePointer);
+          return true;
+        },
+        { semanticUpdate: [id] },
+      );
+      if (inserted) showToast(t('nodeInsertDone'), 'success');
+    };
+
+    // While the node-edit tool is active, body drags on the node-edited object
+    // must not translate it. Lock flags cannot be used for this: the legacy
+    // lock bridge would persist them as metadata.locked in the next snapshot.
+    const blockBodyDrag = (opt: fabric.BasicTransformEvent & { target: fabric.FabricObject }) => {
+      const target = opt.target;
+      if (!target || !hasNodeEditControls(target)) return;
+      const original = opt.transform?.original as { left?: number; top?: number } | undefined;
+      if (!original || typeof original.left !== 'number' || typeof original.top !== 'number') return;
+      target.set({ left: original.left, top: original.top });
+      target.setCoords();
+    };
+
+    syncNodeControls();
+    const disposeNodeEvents = disposeAll([
+      canvas.on('selection:created', syncNodeControls),
+      canvas.on('selection:updated', syncNodeControls),
+      canvas.on('selection:cleared', syncNodeControls),
+      canvas.on('mouse:dblclick', handleNodeDblClick),
+      canvas.on('object:moving', blockBodyDrag),
+    ]);
+    return () => {
+      disposeNodeEvents();
+      if (!canvas.destroyed && !canvas.disposed) {
+        canvas.getObjects().forEach(detachNodeEditControls);
+        canvas.requestRenderAll();
+      }
+    };
+  }, [activeTool, pushHistory, t]);
 
   // Render smart guide lines and stored guide lines via after:render
   useEffect(() => {

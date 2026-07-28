@@ -173,7 +173,7 @@ describe('sectionGeometry', () => {
   it.each([
     ['open polyline', new fabric.Polyline([{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }])],
     ['line', new fabric.Line([0, 0, 20, 20])],
-    ['arbitrary path', new fabric.Path('M 0 0 L 10 0 L 0 10 Z')],
+    ['open path', new fabric.Path('M 0 0 L 10 0 L 0 10')],
   ])('rejects unsupported %s geometry', (_label, object) => {
     expect(() => sectionProfileFromFabricObject(object)).toThrowError(SectionGeometryError);
     try {
@@ -181,6 +181,14 @@ describe('sectionGeometry', () => {
     } catch (error) {
       expect((error as SectionGeometryError).code).toBe('unsupported-object');
     }
+  });
+
+  it('converts a closed path into a section profile', () => {
+    const path = new fabric.Path('M 0 0 L 10 0 L 0 10 Z', { strokeWidth: 0 });
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings).toHaveLength(1);
+    expect(profile.rings[0].role).toBe('outer');
+    expect(Math.abs(signedSectionRingArea(profile.rings[0].points))).toBeCloseTo(50, 9);
   });
 
   it('rejects self-intersecting polygons before analysis', () => {

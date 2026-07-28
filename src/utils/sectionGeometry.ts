@@ -1,4 +1,6 @@
 import * as fabric from 'fabric';
+import polygonClipping from 'polygon-clipping';
+import type { MultiPolygon, Pair, Polygon as ClipPolygon } from 'polygon-clipping';
 import {
   normalizeSectionProfileData,
   signedSectionRingArea,
@@ -16,6 +18,11 @@ import {
   vectorLength,
 } from '../domain/sectionGeometryPredicates';
 import { getFabricMetadata } from './fabricObjectMetadata';
+import {
+  cubicPointAt,
+  quadraticPointAt,
+  type SimplePathCommand,
+} from './pathCommands';
 
 export const DEFAULT_SECTION_TOLERANCE_MM = 0.01;
 
@@ -33,6 +40,7 @@ export type SectionGeometryErrorCode =
   | 'too-many-vertices'
   | 'self-intersection'
   | 'degenerate-ring'
+  | 'invalid-path'
   | 'invalid-section-profile';
 
 export class SectionGeometryError extends Error {
@@ -334,6 +342,201 @@ function polygonToRing(object: fabric.Polygon, toleranceMm: number): ConvertedRi
   return { rings: [makeOuterRing(points)], approximate: false, analysisToleranceMm: toleranceMm };
 }
 
+const PATH_CLOSURE_EPSILON = 1e-6;
+
+/** Whether every subpath of a Fabric path is explicitly or implicitly closed. */
+export function isClosedFabricPath(object: fabric.Path): boolean {
+  const commands = object.path as unknown as SimplePathCommand[];
+  if (commands.length === 0) return false;
+  let startX = 0;
+  let startY = 0;
+  let x = 0;
+  let y = 0;
+  let hasSubpath = false;
+  let subpathClosed = true;
+  const subpathIsClosed = (): boolean => subpathClosed
+    || (Math.abs(x - startX) <= PATH_CLOSURE_EPSILON && Math.abs(y - startY) <= PATH_CLOSURE_EPSILON);
+  for (const command of commands) {
+    const type = command[0];
+    if (type === 'M') {
+      if (hasSubpath && !subpathIsClosed()) return false;
+      startX = command[1] as number;
+      startY = command[2] as number;
+      x = startX;
+      y = startY;
+      hasSubpath = true;
+      subpathClosed = false;
+    } else if (type === 'L' || type === 'C' || type === 'Q') {
+      if (!hasSubpath) return false;
+      x = command[command.length - 2] as number;
+      y = command[command.length - 1] as number;
+      subpathClosed = false;
+    } else if (type === 'Z' || type === 'z') {
+      subpathClosed = true;
+      x = startX;
+      y = startY;
+    } else {
+      return false;
+    }
+  }
+  return hasSubpath && subpathIsClosed();
+}
+
+/**
+ * Converts a closed Fabric path into section rings. Curve segments are
+ * flattened with the same adaptive tolerance as the other curved shapes, and
+ * the even-odd fill semantics of compound paths are resolved through a
+ * polygon-clipping XOR so holes keep their role.
+ */
+function pathToRings(object: fabric.Path, toleranceMm: number): ConvertedRings {
+  const matrix = object.calcTransformMatrix();
+  assertUsableMatrix(matrix);
+  const commands = object.path as unknown as SimplePathCommand[];
+  const offset = object.pathOffset ?? new fabric.Point(0, 0);
+  const toDocument = (x: number, y: number): SectionPoint =>
+    transformFabricLocalPoint(x - offset.x, y - offset.y, matrix);
+
+  const rawRings: SectionPoint[][] = [];
+  let approximate = false;
+  let ring: SectionPoint[] | null = null;
+  let current: { x: number; y: number } | null = null;
+  let subpathStart: { x: number; y: number } | null = null;
+
+  const openPathError = (): SectionGeometryError => new SectionGeometryError(
+    'unsupported-object',
+    'Only closed paths can be used. Close every subpath before running the operation.',
+  );
+
+  const finishRing = (explicitClose: boolean): void => {
+    if (!ring) return;
+    if (!explicitClose) {
+      if (!current || !subpathStart) throw openPathError();
+      if (
+        Math.abs(current.x - subpathStart.x) > PATH_CLOSURE_EPSILON
+        || Math.abs(current.y - subpathStart.y) > PATH_CLOSURE_EPSILON
+      ) {
+        throw openPathError();
+      }
+    }
+    if (ring.length >= 3) rawRings.push(ring);
+    ring = null;
+  };
+
+  for (const command of commands) {
+    const type = command[0];
+    if (type === 'M') {
+      finishRing(false);
+      current = { x: command[1] as number, y: command[2] as number };
+      subpathStart = current;
+      ring = [toDocument(current.x, current.y)];
+    } else if (type === 'L') {
+      if (!ring || !current) throw openPathError();
+      const end = { x: command[1] as number, y: command[2] as number };
+      const point = toDocument(end.x, end.y);
+      const previous = ring[ring.length - 1];
+      if (!pointsCoincide(previous, point)) ring.push(point);
+      current = end;
+    } else if (type === 'C' || type === 'Q') {
+      if (!ring || !current) throw openPathError();
+      const start = current;
+      const end = type === 'C'
+        ? { x: command[5] as number, y: command[6] as number }
+        : { x: command[3] as number, y: command[4] as number };
+      const pointAt = type === 'C'
+        ? (t: number) => {
+          const p = cubicPointAt(
+            start,
+            { x: command[1] as number, y: command[2] as number },
+            { x: command[3] as number, y: command[4] as number },
+            end,
+            t,
+          );
+          return toDocument(p.x, p.y);
+        }
+        : (t: number) => {
+          const p = quadraticPointAt(
+            start,
+            { x: command[1] as number, y: command[2] as number },
+            end,
+            t,
+          );
+          return toDocument(p.x, p.y);
+        };
+      appendAdaptiveArc(ring, pointAt, 0, 1, toleranceMm);
+      approximate = true;
+      current = end;
+    } else if (type === 'Z' || type === 'z') {
+      finishRing(true);
+      current = subpathStart;
+    } else {
+      throw new SectionGeometryError(
+        'invalid-path',
+        `Unsupported path command "${type}".`,
+      );
+    }
+  }
+  finishRing(false);
+
+  if (rawRings.length === 0) {
+    throw new SectionGeometryError(
+      'degenerate-ring',
+      'The path does not enclose any area.',
+    );
+  }
+
+  // Resolve the even-odd filled region: overlapping subpath rings become
+  // holes exactly as they render. Work around the rings' bbox centre to
+  // reduce floating-point cancellation, mirroring the Boolean kernel.
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  rawRings.forEach((points) => points.forEach((point) => {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }));
+  const centreX = (minX + maxX) / 2;
+  const centreY = (minY + maxY) / 2;
+  const geometries: ClipPolygon[] = rawRings.map((points) => [[
+    ...points.map((point): Pair => [point.x - centreX, point.y - centreY]),
+    [points[0].x - centreX, points[0].y - centreY],
+  ]]);
+
+  let combined: MultiPolygon;
+  try {
+    combined = geometries.length === 1
+      ? polygonClipping.union(geometries[0])
+      : polygonClipping.xor(geometries[0], ...geometries.slice(1));
+  } catch (error) {
+    throw new SectionGeometryError(
+      'invalid-path',
+      error instanceof Error ? error.message : 'The path outline could not be resolved into a region.',
+    );
+  }
+
+  const rings: SectionRing[] = [];
+  combined.forEach((polygon) => polygon.forEach((ringPoints, ringIndex) => {
+    const points = ringPoints.map(([x, y]) => ({ x: x + centreX, y: y + centreY }));
+    if (points.length > 1) {
+      const first = points[0];
+      const last = points[points.length - 1];
+      if (first.x === last.x && first.y === last.y) points.pop();
+    }
+    if (points.length >= 3) {
+      rings.push({ role: ringIndex === 0 ? 'outer' : 'hole', points });
+    }
+  }));
+  if (rings.length === 0) {
+    throw new SectionGeometryError(
+      'degenerate-ring',
+      'The path does not enclose any area.',
+    );
+  }
+  return { rings, approximate, analysisToleranceMm: toleranceMm };
+}
+
 function readLocalProfileMetadata(object: fabric.FabricObject): SectionProfileData | null {
   const metadata = getFabricMetadata(object);
   if (metadata.objectKind !== 'sectionProfile' || !metadata.sectionProfileData) return null;
@@ -356,6 +559,7 @@ export function isSupportedSectionSourceObject(object: fabric.FabricObject): boo
     const children = object.getObjects();
     return children.length > 0 && children.every(isSupportedSectionSourceObject);
   }
+  if (object instanceof fabric.Path) return isClosedFabricPath(object);
   return object instanceof fabric.Rect
     || object instanceof fabric.Circle
     || object instanceof fabric.Ellipse
@@ -464,6 +668,7 @@ function convertObject(object: fabric.FabricObject, toleranceMm: number): Conver
     return ellipseToRing(object, object.rx, object.ry, toleranceMm);
   }
   if (object instanceof fabric.Polygon) return polygonToRing(object, toleranceMm);
+  if (object instanceof fabric.Path) return pathToRings(object, toleranceMm);
 
   const type = object.type || object.constructor.name;
   throw new SectionGeometryError(
