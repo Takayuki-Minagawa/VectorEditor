@@ -50,6 +50,7 @@ import type { SemanticAnchor } from '../utils/fabricObjectMetadata';
 import { setFabricMetadataValues } from '../utils/fabricObjectMetadata';
 import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
 import { applyEditorStyle, loadCurrentEditorStyle } from '../utils/stylePresets';
+import { configureCanvasForTool } from '../utils/toolActivation';
 import LatexDialog from './LatexDialog';
 import Ruler, { RulerCorner } from './Rulers';
 import StretchDialog from './StretchDialog';
@@ -961,7 +962,10 @@ export default function Canvas() {
           () => {
             if (nodeRef.type === 'poly' && active instanceof fabric.Polyline) {
               if (!deletePolylineNode(active, nodeRef.index)) return false;
-              retargetVertexAnchorsAfterDelete(canvas, id, nodeRef.index);
+              retargetVertexAnchorsAfterDelete(canvas, id, nodeRef.index, {
+                closed: active instanceof fabric.Polygon,
+                pointCountBefore: active.points.length + 1,
+              });
             } else if (nodeRef.type === 'path' && active instanceof fabric.Path) {
               if (!deletePathNode(active, nodeRef.commandIndex)) return false;
             } else {
@@ -1040,6 +1044,11 @@ export default function Canvas() {
       disposeNodeEvents();
       if (!canvas.destroyed && !canvas.disposed) {
         canvas.getObjects().forEach(detachNodeEditControls);
+        // The store configures the canvas for the next tool synchronously in
+        // setActiveTool, i.e. before this cleanup restores the saved control
+        // state. Re-apply the current tool's interaction state so switching
+        // straight to the select tool shows the normal transform handles.
+        configureCanvasForTool(canvas, useEditorStore.getState().activeTool);
         canvas.requestRenderAll();
       }
     };

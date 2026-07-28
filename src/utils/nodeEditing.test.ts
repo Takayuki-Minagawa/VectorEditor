@@ -41,6 +41,12 @@ describe('isNodeEditableObject', () => {
     setFabricMetadataValues(dimension, { objectKind: 'dimension' });
     expect(isNodeEditableObject(dimension)).toBe(false);
   });
+
+  it('rejects section profiles whose analysis metadata would desynchronise', () => {
+    const section = new fabric.Path('M 0 0 L 10 0 L 10 10 L 0 10 Z');
+    setFabricMetadataValues(section, { objectKind: 'sectionProfile' });
+    expect(isNodeEditableObject(section)).toBe(false);
+  });
 });
 
 describe('moveLineEndpoint', () => {
@@ -159,6 +165,28 @@ describe('insertPathNode', () => {
     expect(after[2].x).toBeCloseTo(before[1].x, 6);
     expect(after[2].y).toBeCloseTo(before[1].y, 6);
   });
+
+  it('picks the segment nearest on screen under a non-uniform scale', () => {
+    // Raw-local distances: 60 to the vertical segment, 80 to the horizontal
+    // one. With scaleY = 0.1 the on-screen distances become 60 vs 8, so the
+    // horizontal segment must win.
+    const path = new fabric.Path('M 0 200 L 0 0 L 200 0', { strokeWidth: 0, scaleY: 0.1 });
+    const offset = path.pathOffset;
+    const scenePoint = fabric.util.transformPoint(
+      new fabric.Point(60 - offset.x, 80 - offset.y),
+      path.calcTransformMatrix(),
+    );
+
+    const inserted = insertPathNode(path, { x: scenePoint.x, y: scenePoint.y }, 100);
+
+    expect(inserted).not.toBeNull();
+    const commands = path.path as unknown as [string, ...number[]][];
+    expect(commands).toHaveLength(4);
+    // The new anchor sits on the horizontal segment at the pointer's x.
+    expect(commands[2][0]).toBe('L');
+    expect(commands[2][1]).toBeCloseTo(60, 6);
+    expect(commands[2][2]).toBeCloseTo(0, 6);
+  });
 });
 
 describe('findNodeAtScenePoint', () => {
@@ -209,6 +237,42 @@ describe('convertLineToPolylineWithNode', () => {
     expect(convertLineToPolylineWithNode(line, { x: 50, y: 40 }, 10)).toBeNull();
     expect(convertLineToPolylineWithNode(line, { x: -20, y: 0 }, 10)).toBeNull();
   });
+
+  it('preserves the source transform and stroke rendering attributes', () => {
+    const line = new fabric.Line([0, 0, 100, 0], {
+      stroke: '#123456',
+      strokeWidth: 4,
+      strokeUniform: false,
+      strokeDashOffset: 5,
+      scaleX: 2,
+      scaleY: 3,
+      angle: 30,
+    });
+    const [startBefore, endBefore] = scenePoints(line);
+    const middle = {
+      x: (startBefore.x + endBefore.x) / 2,
+      y: (startBefore.y + endBefore.y) / 2,
+    };
+
+    const polyline = convertLineToPolylineWithNode(line, middle, 10)!;
+    expect(polyline).not.toBeNull();
+    // The transform is carried over instead of being baked into the points,
+    // so non-uniform stroke scaling keeps rendering exactly as before.
+    expect(polyline.strokeUniform).toBe(false);
+    expect(polyline.strokeDashOffset).toBe(5);
+    expect(polyline.scaleX).toBeCloseTo(2, 9);
+    expect(polyline.scaleY).toBeCloseTo(3, 9);
+    expect(polyline.angle).toBeCloseTo(30, 9);
+
+    const nodes = scenePoints(polyline);
+    expect(nodes).toHaveLength(3);
+    expect(nodes[0].x).toBeCloseTo(startBefore.x, 6);
+    expect(nodes[0].y).toBeCloseTo(startBefore.y, 6);
+    expect(nodes[1].x).toBeCloseTo(middle.x, 6);
+    expect(nodes[1].y).toBeCloseTo(middle.y, 6);
+    expect(nodes[2].x).toBeCloseTo(endBefore.x, 6);
+    expect(nodes[2].y).toBeCloseTo(endBefore.y, 6);
+  });
 });
 
 describe('semantic anchor maintenance', () => {
@@ -254,6 +318,66 @@ describe('semantic anchor maintenance', () => {
     expect(data.start.anchor).toBeUndefined();
     expect(data.start).toMatchObject({ x: 0, y: 0 });
     expect(data.end.vertexIndex).toBe(2);
+    canvas.dispose();
+  });
+
+  it('detaches the split segment midpoint and shifts later midpoints on insert', () => {
+    const canvas = new fabric.Canvas();
+    const dimension = dimensionWith({
+      start: { x: 5, y: 0, objectId: 'poly_1', anchor: 'midpoint', vertexIndex: 1 },
+      end: { x: 10, y: 0, objectId: 'poly_1', anchor: 'midpoint', vertexIndex: 2 },
+    });
+    canvas.add(dimension);
+
+    // Inserting at index 2 splits the segment starting at vertex 1: its old
+    // midpoint no longer exists.
+    shiftVertexAnchorsAfterInsert(canvas, 'poly_1', 2);
+    const data = getFabricMetadata(dimension).dimensionData!;
+    expect(data.start.objectId).toBeUndefined();
+    expect(data.start).toMatchObject({ x: 5, y: 0 });
+    expect(data.end).toMatchObject({ anchor: 'midpoint', vertexIndex: 3 });
+    canvas.dispose();
+  });
+
+  it('detaches midpoints of both segments adjacent to a deleted vertex', () => {
+    const canvas = new fabric.Canvas();
+    const dimension = dimensionWith({
+      start: { x: 5, y: 0, objectId: 'poly_1', anchor: 'midpoint', vertexIndex: 1 },
+      end: { x: 10, y: 0, objectId: 'poly_1', anchor: 'midpoint', vertexIndex: 3 },
+    });
+    canvas.add(dimension);
+
+    // Deleting vertex 2 merges segments (1,2) and (2,3): the midpoint of the
+    // preceding segment detaches, later midpoints shift down.
+    retargetVertexAnchorsAfterDelete(canvas, 'poly_1', 2, {
+      closed: false,
+      pointCountBefore: 5,
+    });
+    const data = getFabricMetadata(dimension).dimensionData!;
+    expect(data.start.objectId).toBeUndefined();
+    expect(data.start).toMatchObject({ x: 5, y: 0 });
+    expect(data.end).toMatchObject({ anchor: 'midpoint', vertexIndex: 2 });
+    canvas.dispose();
+  });
+
+  it('detaches the wrap-around midpoint when a polygon loses its first vertex', () => {
+    const canvas = new fabric.Canvas();
+    const dimension = dimensionWith({
+      start: { x: 5, y: 0, objectId: 'poly_1', anchor: 'midpoint', vertexIndex: 3 },
+      end: { x: 10, y: 0, objectId: 'poly_1', anchor: 'midpoint', vertexIndex: 1 },
+    });
+    canvas.add(dimension);
+
+    // Deleting vertex 0 of a closed square merges the closing segment (3,0)
+    // with segment (0,1); the closing segment's midpoint detaches.
+    retargetVertexAnchorsAfterDelete(canvas, 'poly_1', 0, {
+      closed: true,
+      pointCountBefore: 4,
+    });
+    const data = getFabricMetadata(dimension).dimensionData!;
+    expect(data.start.objectId).toBeUndefined();
+    expect(data.start).toMatchObject({ x: 5, y: 0 });
+    expect(data.end).toMatchObject({ anchor: 'midpoint', vertexIndex: 0 });
     canvas.dispose();
   });
 

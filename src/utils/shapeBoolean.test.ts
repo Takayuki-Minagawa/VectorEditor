@@ -136,6 +136,18 @@ describe('applyBooleanOperationToSelection', () => {
     canvas.dispose();
   });
 
+  it('accepts the built-in triangle as a Boolean source', () => {
+    const canvas = new fabric.Canvas();
+    // Fabric v7 uses a center origin: the triangle sits fully inside the rect.
+    const back = new fabric.Rect({ left: 0, top: 0, width: 100, height: 100, strokeWidth: 0 });
+    const triangle = new fabric.Triangle({ left: 0, top: 0, width: 40, height: 30, strokeWidth: 0 });
+    select(canvas, [back, triangle]);
+
+    const result = applyBooleanOperationToSelection(canvas, vi.fn(), 'subtract');
+    expect(areaOf(result)).toBeCloseTo(10_000 - 600, 6);
+    canvas.dispose();
+  });
+
   it('throws a no-intersection error for disjoint intersect inputs', () => {
     const canvas = new fabric.Canvas();
     select(canvas, [
@@ -152,6 +164,7 @@ describe('isBooleanSourceObject / isClosedFabricPath', () => {
   it('accepts closed shapes and closed paths, rejects open geometry', () => {
     expect(isBooleanSourceObject(new fabric.Rect({ width: 10, height: 10 }))).toBe(true);
     expect(isBooleanSourceObject(new fabric.Circle({ radius: 5 }))).toBe(true);
+    expect(isBooleanSourceObject(new fabric.Triangle({ width: 10, height: 10 }))).toBe(true);
     expect(isBooleanSourceObject(new fabric.Line([0, 0, 10, 10]))).toBe(false);
     expect(isBooleanSourceObject(new fabric.Polyline([{ x: 0, y: 0 }, { x: 10, y: 0 }]))).toBe(false);
 

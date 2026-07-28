@@ -236,19 +236,37 @@ function nearestOnSegment(segment: PathSegment, point: PathPoint): { t: number; 
   return { t, point: pointOnSegment(segment, t) };
 }
 
+export interface NearestSegmentHit extends NearestPathPointHit {
+  /** Index of the hit segment within the searched segment list. */
+  segmentIndex: number;
+}
+
+/**
+ * Finds the nearest point across a pre-built segment list. Callers that need
+ * distances in a different space (e.g. scene coordinates for a transformed
+ * Fabric object) can transform the segments' control points first — affine
+ * transforms map Béziers to Béziers and preserve the curve parameter t.
+ */
+export function findNearestPointOnSegments(
+  segments: readonly PathSegment[],
+  point: PathPoint,
+): NearestSegmentHit | null {
+  let best: NearestSegmentHit | null = null;
+  segments.forEach((segment, segmentIndex) => {
+    const nearest = nearestOnSegment(segment, point);
+    const distance = distanceSquared(nearest.point, point);
+    if (!best || distance < best.distanceSquared) {
+      best = { segment, segmentIndex, t: nearest.t, point: nearest.point, distanceSquared: distance };
+    }
+  });
+  return best;
+}
+
 export function findNearestPathPoint(
   path: readonly SimplePathCommand[],
   point: PathPoint,
 ): NearestPathPointHit | null {
-  let best: NearestPathPointHit | null = null;
-  for (const segment of listPathSegments(path)) {
-    const nearest = nearestOnSegment(segment, point);
-    const distance = distanceSquared(nearest.point, point);
-    if (!best || distance < best.distanceSquared) {
-      best = { segment, t: nearest.t, point: nearest.point, distanceSquared: distance };
-    }
-  }
-  return best;
+  return findNearestPointOnSegments(listPathSegments(path), point);
 }
 
 /**

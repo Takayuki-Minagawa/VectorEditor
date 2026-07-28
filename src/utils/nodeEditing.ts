@@ -9,9 +9,13 @@ import { generateObjectId } from './objectIds';
 import { applyObjectDefaults } from './shapeFactory';
 import {
   deletePathAnchor,
-  findNearestPathPoint,
+  findNearestPointOnSegments,
   insertAnchorOnSegment,
   listPathAnchors,
+  listPathSegments,
+  pointOnSegment,
+  type NearestPathPointHit,
+  type PathPoint,
   type SimplePathCommand,
 } from './pathCommands';
 
@@ -35,6 +39,10 @@ export function isNodeEditableObject(object: fabric.FabricObject): object is Nod
   const metadata = getFabricMetadata(object);
   if (metadata.locked) return false;
   if (metadata.objectKind === 'dimension' || metadata.objectKind === 'connector') return false;
+  // Section profiles derive their analysis geometry (area, centroid, CAD
+  // snapping) from metadata, which node edits would silently desynchronise
+  // from the visible path.
+  if (metadata.objectKind === 'sectionProfile') return false;
   return object instanceof fabric.Line
     || object instanceof fabric.Polyline
     || object instanceof fabric.Path;
@@ -135,12 +143,22 @@ function buildLineControls(snapPoint: SnapPointFn): Record<string, fabric.Contro
   return { lineStart: makeControl('start'), lineEnd: makeControl('end') };
 }
 
-function buildPathControls(path: fabric.Path): Record<string, fabric.Control> {
-  return fabric.controlsUtils.createPathControls(path, {
+function buildPathControls(
+  path: fabric.Path,
+  snapPoint: SnapPointFn,
+): Record<string, fabric.Control> {
+  const controls = fabric.controlsUtils.createPathControls(path, {
     ...NODE_CONTROL_OPTIONS,
     pointStyle: { controlFill: '#2196F3', controlStroke: '#ffffff' },
     controlPointStyle: { controlFill: '#ffffff', controlStroke: '#2196F3', connectionDashArray: [3, 3] },
   });
+  // Anchor and Bézier handle drags follow the same grid snapping as the
+  // line/polyline node handles.
+  Object.values(controls).forEach((control) => {
+    const handler = control.actionHandler as AnyActionHandler | undefined;
+    if (handler) control.actionHandler = withSnappedPointer(handler, snapPoint);
+  });
+  return controls;
 }
 
 function buildControlsFor(
@@ -149,7 +167,7 @@ function buildControlsFor(
 ): Record<string, fabric.Control> {
   if (object instanceof fabric.Line) return buildLineControls(snapPoint);
   if (object instanceof fabric.Polyline) return buildPolyControls(object, snapPoint);
-  return buildPathControls(object);
+  return buildPathControls(object, snapPoint);
 }
 
 interface SavedInteractionState {
@@ -225,19 +243,6 @@ function rawLocalToScene(
     object.calcTransformMatrix(),
   );
   return { x: transformed.x, y: transformed.y };
-}
-
-function sceneToRawLocal(
-  object: fabric.Polyline | fabric.Path,
-  point: { x: number; y: number },
-): { x: number; y: number } {
-  const offset = pathOffsetOf(object);
-  const local = fabric.util.sendPointToPlane(
-    new fabric.Point(point.x, point.y),
-    undefined,
-    object.calcTransformMatrix(),
-  );
-  return { x: local.x + offset.x, y: local.y + offset.y };
 }
 
 /** All draggable/removable anchors in scene coordinates. */
@@ -377,11 +382,31 @@ export function insertPathNode(
   toleranceScene: number,
 ): number | null {
   const commands = path.path as unknown as SimplePathCommand[];
-  const localPoint = sceneToRawLocal(path, scenePoint);
-  const hit = findNearestPathPoint(commands, localPoint);
-  if (!hit) return null;
-  const sceneHit = rawLocalToScene(path, hit.point);
-  if (sceneDistanceSquared(sceneHit, scenePoint) > toleranceScene * toleranceScene) return null;
+  const segments = listPathSegments(commands);
+  if (segments.length === 0) return null;
+
+  // Compare candidate segments in scene space: with a non-uniform scale or
+  // skew the raw-local distance order does not match what the user sees.
+  // Affine transforms map Béziers to Béziers and preserve the parameter t,
+  // so the scene-space t can split the raw-local segment directly.
+  const toScene = (point: PathPoint): PathPoint => rawLocalToScene(path, point);
+  const sceneSegments = segments.map((segment) => ({
+    ...segment,
+    start: toScene(segment.start),
+    end: toScene(segment.end),
+    control1: segment.control1 ? toScene(segment.control1) : undefined,
+    control2: segment.control2 ? toScene(segment.control2) : undefined,
+  }));
+  const sceneHit = findNearestPointOnSegments(sceneSegments, scenePoint);
+  if (!sceneHit || sceneHit.distanceSquared > toleranceScene * toleranceScene) return null;
+
+  const segment = segments[sceneHit.segmentIndex];
+  const hit: NearestPathPointHit = {
+    segment,
+    t: sceneHit.t,
+    point: pointOnSegment(segment, sceneHit.t),
+    distanceSquared: sceneHit.distanceSquared,
+  };
 
   const anchors = listPathAnchors(commands);
   if (anchors.length === 0) return null;
@@ -427,25 +452,50 @@ export function convertLineToPolylineWithNode(
   const projected = { x: start.x + dx * t, y: start.y + dy * t };
   if (sceneDistanceSquared(projected, scenePoint) > toleranceScene * toleranceScene) return null;
 
+  // Build the polyline in the line's own local space and carry the whole
+  // transform over, so stroke rendering (strokeUniform, dashes, shadow) and
+  // any scale/skew stay exactly as they were. The affine parameter t places
+  // the new vertex at the projected scene position.
+  const localStart = { x: line.x1, y: line.y1 };
+  const localEnd = { x: line.x2, y: line.y2 };
+  const localInserted = {
+    x: localStart.x + (localEnd.x - localStart.x) * t,
+    y: localStart.y + (localEnd.y - localStart.y) * t,
+  };
+  const sceneCenter = line.getCenterPoint();
   const polyline = new fabric.Polyline(
-    [
-      { x: start.x, y: start.y },
-      projected,
-      { x: end.x, y: end.y },
-    ],
+    [localStart, localInserted, localEnd],
     {
       fill: '',
       stroke: line.stroke as string | null ?? undefined,
       strokeWidth: line.strokeWidth,
       strokeDashArray: line.strokeDashArray ? [...line.strokeDashArray] : undefined,
+      strokeDashOffset: line.strokeDashOffset,
       strokeLineCap: line.strokeLineCap,
       strokeLineJoin: line.strokeLineJoin,
+      strokeMiterLimit: line.strokeMiterLimit,
       opacity: line.opacity,
+      visible: line.visible,
+      shadow: line.shadow ?? undefined,
+      clipPath: line.clipPath,
+      angle: line.angle,
+      scaleX: line.scaleX,
+      scaleY: line.scaleY,
+      skewX: line.skewX,
+      skewY: line.skewY,
+      flipX: line.flipX,
+      flipY: line.flipY,
     },
   );
   const metadata = getFabricMetadata(line);
   applyObjectDefaults(polyline, metadata.id ?? generateObjectId('polyline'), 'polyline');
+  // applyObjectDefaults standardises strokeUniform for newly drawn shapes;
+  // a conversion must keep the source line's rendering instead.
+  polyline.set({ strokeUniform: line.strokeUniform });
   setFabricMetadataValues(polyline, { name: metadata.name, locked: metadata.locked });
+  // A collinear inserted vertex leaves the local bbox unchanged, so pinning
+  // the centre reproduces the line's exact scene geometry.
+  polyline.setPositionByOrigin(sceneCenter, 'center', 'center');
   polyline.setCoords();
   return polyline;
 }
@@ -487,27 +537,59 @@ function staticAnchor(anchor: SemanticAnchor): SemanticAnchor {
   return { x: anchor.x, y: anchor.y };
 }
 
-/** Keeps vertex-bound dimensions/connectors pointing at the same node after an insert. */
+/**
+ * Keeps vertex-bound dimensions/connectors pointing at the same node after an
+ * insert. Midpoint references name the segment's start vertex, so the split
+ * segment's midpoint (which no longer exists) detaches to its coordinates and
+ * only later segments shift.
+ */
 export function shiftVertexAnchorsAfterInsert(
   canvas: fabric.Canvas,
   objectId: string,
   insertedIndex: number,
 ): void {
   updateSemanticAnchorsForObject(canvas, objectId, (anchor) => {
-    if (anchor.vertexIndex === undefined || anchor.vertexIndex < insertedIndex) return anchor;
+    if (anchor.vertexIndex === undefined) return anchor;
+    if (anchor.anchor === 'midpoint') {
+      if (anchor.vertexIndex === insertedIndex - 1) return staticAnchor(anchor);
+      if (anchor.vertexIndex >= insertedIndex) return { ...anchor, vertexIndex: anchor.vertexIndex + 1 };
+      return anchor;
+    }
+    if (anchor.vertexIndex < insertedIndex) return anchor;
     return { ...anchor, vertexIndex: anchor.vertexIndex + 1 };
   });
 }
 
-/** Shifts or detaches vertex-bound references after a node deletion. */
+export interface VertexDeleteContext {
+  /** True for closed polygons, whose last segment wraps back to vertex 0. */
+  closed: boolean;
+  /** Vertex count before the deletion. */
+  pointCountBefore: number;
+}
+
+/** Shifts or detaches vertex- and midpoint-bound references after a node deletion. */
 export function retargetVertexAnchorsAfterDelete(
   canvas: fabric.Canvas,
   objectId: string,
   deletedIndex: number,
+  context?: VertexDeleteContext,
 ): void {
+  // Both segments adjacent to the deleted vertex merge into one, so their
+  // midpoints detach instead of silently following the merged segment.
+  const previousSegmentIndex = deletedIndex > 0
+    ? deletedIndex - 1
+    : (context?.closed ? context.pointCountBefore - 1 : -1);
   updateSemanticAnchorsForObject(canvas, objectId, (anchor) => {
-    if (anchor.vertexIndex === undefined || anchor.vertexIndex < deletedIndex) return anchor;
-    if (anchor.vertexIndex === deletedIndex && anchor.anchor === 'vertex') return staticAnchor(anchor);
+    if (anchor.vertexIndex === undefined) return anchor;
+    if (anchor.anchor === 'midpoint') {
+      if (anchor.vertexIndex === deletedIndex || anchor.vertexIndex === previousSegmentIndex) {
+        return staticAnchor(anchor);
+      }
+      if (anchor.vertexIndex > deletedIndex) return { ...anchor, vertexIndex: anchor.vertexIndex - 1 };
+      return anchor;
+    }
+    if (anchor.vertexIndex < deletedIndex) return anchor;
+    if (anchor.vertexIndex === deletedIndex) return staticAnchor(anchor);
     return { ...anchor, vertexIndex: anchor.vertexIndex - 1 };
   });
 }

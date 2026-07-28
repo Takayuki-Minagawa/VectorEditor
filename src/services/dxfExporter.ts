@@ -1,6 +1,8 @@
 import * as fabric from 'fabric';
 import {
+  isClosedFabricPath,
   readSectionProfileInDocumentCoordinates,
+  sectionProfileFromFabricObject,
   SectionGeometryError,
 } from '../utils/sectionGeometry';
 import { getFabricMetadata } from '../utils/fabricObjectMetadata';
@@ -234,6 +236,43 @@ export function exportObjectsToDxf(
         dxfPoint(scenePoint(object, { x: points.x1, y: points.y1 }), drawingHeight),
         dxfPoint(scenePoint(object, { x: points.x2, y: points.y2 }), drawingHeight),
       );
+      return;
+    }
+
+    if (object instanceof fabric.Path) {
+      // Closed (possibly compound) paths — e.g. Boolean operation results —
+      // export as one closed POLYLINE per ring, flattened with the shared
+      // section tolerance. Open paths stay unsupported.
+      if (!isClosedFabricPath(object)) {
+        unsupported.add(typeName(object));
+        return;
+      }
+      let profile: ReturnType<typeof sectionProfileFromFabricObject>;
+      try {
+        profile = sectionProfileFromFabricObject(object);
+      } catch (error: unknown) {
+        if (!(error instanceof SectionGeometryError)) throw error;
+        unsupported.add(typeName(object));
+        return;
+      }
+      profile.rings.forEach((ring) => {
+        addPolyline(
+          entities,
+          ring.points.map((point) => ({
+            x: point.x,
+            // Ring points use engineering coordinates (+y up); shift them
+            // into the bottom-left DXF space like the section profiles.
+            y: drawingHeight + point.y,
+          })),
+          true,
+        );
+      });
+      if (profile.approximate) approximated.add('PathApproximation');
+      if (profile.rings.some((ring) => ring.role === 'hole')) {
+        // R12 POLYLINE carries no hole topology; the boundary is exported but
+        // downstream CAD software may interpret it as material.
+        approximated.add('PathHoles');
+      }
       return;
     }
 
