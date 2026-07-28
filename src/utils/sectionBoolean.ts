@@ -172,6 +172,86 @@ export function unionSectionProfiles(
   );
 }
 
+/** Intersects two or more profiles, keeping only the material shared by all. */
+export function intersectSectionProfiles(
+  profiles: readonly SectionProfileData[],
+): SectionProfileData;
+export function intersectSectionProfiles(
+  first: SectionProfileData,
+  second: SectionProfileData,
+  ...rest: SectionProfileData[]
+): SectionProfileData;
+export function intersectSectionProfiles(
+  first: SectionProfileData | readonly SectionProfileData[],
+  ...rest: SectionProfileData[]
+): SectionProfileData {
+  const profiles = asProfileArray(first, rest).map(normalizeInput);
+  if (profiles.length < 2) {
+    throw new SectionBooleanError('empty-input', 'Intersection requires at least two section profiles.');
+  }
+  const translation = profileTranslation(profiles);
+  const geometries = profiles.map((profile) => profileToMultiPolygon(profile, translation));
+  let result: MultiPolygon;
+  try {
+    result = geometries
+      .slice(1)
+      .reduce((accumulated, geometry) => polygonClipping.intersection(accumulated, geometry), geometries[0]);
+  } catch (error) {
+    throw new SectionBooleanError(
+      'invalid-input',
+      error instanceof Error ? error.message : 'The intersection failed.',
+    );
+  }
+  if (result.length === 0 || multiPolygonArea(result) <= 0) {
+    throw new SectionBooleanError(
+      'no-intersection',
+      'The selected shapes do not overlap.',
+    );
+  }
+  return resultToProfile(
+    result,
+    translation,
+    Math.max(...profiles.map((profile) => profile.analysisToleranceMm)),
+    profiles.some((profile) => profile.approximate),
+  );
+}
+
+/** Symmetric difference (exclude): keeps areas covered by an odd number of profiles. */
+export function xorSectionProfiles(
+  profiles: readonly SectionProfileData[],
+): SectionProfileData;
+export function xorSectionProfiles(
+  first: SectionProfileData,
+  second: SectionProfileData,
+  ...rest: SectionProfileData[]
+): SectionProfileData;
+export function xorSectionProfiles(
+  first: SectionProfileData | readonly SectionProfileData[],
+  ...rest: SectionProfileData[]
+): SectionProfileData {
+  const profiles = asProfileArray(first, rest).map(normalizeInput);
+  if (profiles.length < 2) {
+    throw new SectionBooleanError('empty-input', 'Exclusion requires at least two section profiles.');
+  }
+  const translation = profileTranslation(profiles);
+  const geometries = profiles.map((profile) => profileToMultiPolygon(profile, translation));
+  let result: MultiPolygon;
+  try {
+    result = polygonClipping.xor(geometries[0], ...geometries.slice(1));
+  } catch (error) {
+    throw new SectionBooleanError(
+      'invalid-input',
+      error instanceof Error ? error.message : 'The exclusion failed.',
+    );
+  }
+  return resultToProfile(
+    result,
+    translation,
+    Math.max(...profiles.map((profile) => profile.analysisToleranceMm)),
+    profiles.some((profile) => profile.approximate),
+  );
+}
+
 /** Subtracts one or more cutter profiles from the subject section. */
 export function differenceSectionProfiles(
   subject: SectionProfileData,

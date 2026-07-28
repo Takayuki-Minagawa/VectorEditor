@@ -1,4 +1,6 @@
 import * as fabric from 'fabric';
+import polygonClipping from 'polygon-clipping';
+import type { MultiPolygon, Pair, Polygon as ClipPolygon } from 'polygon-clipping';
 import {
   normalizeSectionProfileData,
   signedSectionRingArea,
@@ -16,6 +18,11 @@ import {
   vectorLength,
 } from '../domain/sectionGeometryPredicates';
 import { getFabricMetadata } from './fabricObjectMetadata';
+import {
+  splitCubicAt,
+  splitQuadraticAt,
+  type SimplePathCommand,
+} from './pathCommands';
 
 export const DEFAULT_SECTION_TOLERANCE_MM = 0.01;
 
@@ -33,6 +40,7 @@ export type SectionGeometryErrorCode =
   | 'too-many-vertices'
   | 'self-intersection'
   | 'degenerate-ring'
+  | 'invalid-path'
   | 'invalid-section-profile';
 
 export class SectionGeometryError extends Error {
@@ -242,6 +250,106 @@ function appendAdaptiveArc(
   }
 }
 
+function pointToChordDistanceSquared(
+  point: SectionPoint,
+  chordStart: SectionPoint,
+  chordEnd: SectionPoint,
+): number {
+  const dx = chordEnd.x - chordStart.x;
+  const dy = chordEnd.y - chordStart.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared <= Number.EPSILON) return pointDistanceSquared(point, chordStart);
+  const cross = (point.x - chordStart.x) * dy - (point.y - chordStart.y) * dx;
+  return (cross * cross) / lengthSquared;
+}
+
+function pushFlattenedSegment(output: SectionPoint[], start: SectionPoint, end: SectionPoint): void {
+  if (output.length === 0 || !pointsCoincide(output[output.length - 1], start)) output.push(start);
+  output.push(end);
+  if (output.length > MAX_CURVE_VERTICES) {
+    throw new SectionGeometryError(
+      'too-many-vertices',
+      `Curve tessellation exceeded ${MAX_CURVE_VERTICES.toLocaleString()} vertices.`,
+    );
+  }
+}
+
+/**
+ * Flattens one cubic Bézier with a control-point flatness test. The chord
+ * midpoint test used for circular arcs cannot be reused here: an S-shaped
+ * curve passes through the chord midpoint at t = 0.5 while deviating far from
+ * the chord elsewhere. The curve stays inside its control hull, so bounding
+ * the control points' chord distance bounds the whole curve.
+ */
+function appendAdaptiveCubic(
+  output: SectionPoint[],
+  start: SectionPoint,
+  control1: SectionPoint,
+  control2: SectionPoint,
+  end: SectionPoint,
+  toleranceMm: number,
+  depth = 0,
+): void {
+  const subdivisionTolerance = toleranceMm / 16;
+  const deviationSquared = Math.max(
+    pointToChordDistanceSquared(control1, start, end),
+    pointToChordDistanceSquared(control2, start, end),
+  );
+  if (deviationSquared > subdivisionTolerance * subdivisionTolerance) {
+    if (depth >= MAX_CURVE_SUBDIVISION_DEPTH) {
+      throw new SectionGeometryError(
+        'too-many-vertices',
+        'Curve tessellation did not converge within the section tolerance.',
+      );
+    }
+    const split = splitCubicAt(start, control1, control2, end, 0.5);
+    appendAdaptiveCubic(
+      output,
+      start,
+      split.first.control1,
+      split.first.control2,
+      split.first.end,
+      toleranceMm,
+      depth + 1,
+    );
+    appendAdaptiveCubic(
+      output,
+      split.first.end,
+      split.second.control1,
+      split.second.control2,
+      end,
+      toleranceMm,
+      depth + 1,
+    );
+    return;
+  }
+  pushFlattenedSegment(output, start, end);
+}
+
+function appendAdaptiveQuadratic(
+  output: SectionPoint[],
+  start: SectionPoint,
+  control: SectionPoint,
+  end: SectionPoint,
+  toleranceMm: number,
+  depth = 0,
+): void {
+  const subdivisionTolerance = toleranceMm / 16;
+  if (pointToChordDistanceSquared(control, start, end) > subdivisionTolerance * subdivisionTolerance) {
+    if (depth >= MAX_CURVE_SUBDIVISION_DEPTH) {
+      throw new SectionGeometryError(
+        'too-many-vertices',
+        'Curve tessellation did not converge within the section tolerance.',
+      );
+    }
+    const split = splitQuadraticAt(start, control, end, 0.5);
+    appendAdaptiveQuadratic(output, start, split.first.control, split.first.end, toleranceMm, depth + 1);
+    appendAdaptiveQuadratic(output, split.first.end, split.second.control, end, toleranceMm, depth + 1);
+    return;
+  }
+  pushFlattenedSegment(output, start, end);
+}
+
 function rectToRing(object: fabric.Rect, toleranceMm: number): ConvertedRings {
   const matrix = object.calcTransformMatrix();
   assertUsableMatrix(matrix);
@@ -334,6 +442,298 @@ function polygonToRing(object: fabric.Polygon, toleranceMm: number): ConvertedRi
   return { rings: [makeOuterRing(points)], approximate: false, analysisToleranceMm: toleranceMm };
 }
 
+function triangleToRing(object: fabric.Triangle, toleranceMm: number): ConvertedRings {
+  const matrix = object.calcTransformMatrix();
+  assertUsableMatrix(matrix);
+  const width = object.width;
+  const height = object.height;
+  assertFiniteValues('Triangle', width, height);
+  if (width <= 0 || height <= 0) {
+    throw new SectionGeometryError(
+      'degenerate-ring',
+      'A section triangle must have positive width and height.',
+    );
+  }
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  return {
+    rings: [makeOuterRing([
+      transformFabricLocalPoint(0, -halfHeight, matrix),
+      transformFabricLocalPoint(halfWidth, halfHeight, matrix),
+      transformFabricLocalPoint(-halfWidth, halfHeight, matrix),
+    ])],
+    approximate: false,
+    analysisToleranceMm: toleranceMm,
+  };
+}
+
+const PATH_CLOSURE_EPSILON = 1e-6;
+
+/** Whether every subpath of a Fabric path is explicitly or implicitly closed. */
+export function isClosedFabricPath(object: fabric.Path): boolean {
+  const commands = object.path as unknown as SimplePathCommand[];
+  if (commands.length === 0) return false;
+  let startX = 0;
+  let startY = 0;
+  let x = 0;
+  let y = 0;
+  let hasSubpath = false;
+  let subpathClosed = true;
+  const subpathIsClosed = (): boolean => subpathClosed
+    || (Math.abs(x - startX) <= PATH_CLOSURE_EPSILON && Math.abs(y - startY) <= PATH_CLOSURE_EPSILON);
+  for (const command of commands) {
+    const type = command[0];
+    if (type === 'M') {
+      if (hasSubpath && !subpathIsClosed()) return false;
+      startX = command[1] as number;
+      startY = command[2] as number;
+      x = startX;
+      y = startY;
+      hasSubpath = true;
+      subpathClosed = false;
+    } else if (type === 'L' || type === 'C' || type === 'Q') {
+      if (!hasSubpath) return false;
+      x = command[command.length - 2] as number;
+      y = command[command.length - 1] as number;
+      subpathClosed = false;
+    } else if (type === 'Z' || type === 'z') {
+      subpathClosed = true;
+      x = startX;
+      y = startY;
+    } else {
+      return false;
+    }
+  }
+  return hasSubpath && subpathIsClosed();
+}
+
+/**
+ * Regions covered by at least `index + 1` of `polygons`, indexed by `index`.
+ * Coverage counts are accumulated incrementally from deepest to shallowest so
+ * a layer is only ever combined with the previous iteration's values, and
+ * mutually disjoint rings — the common case — cost one union each.
+ */
+function coverageLayers(polygons: readonly ClipPolygon[]): MultiPolygon[] {
+  const layers: MultiPolygon[] = [];
+  polygons.forEach((polygon) => {
+    for (let level = layers.length - 1; level >= 0; level -= 1) {
+      const promoted = polygonClipping.intersection(layers[level], polygon);
+      if (promoted.length === 0) continue;
+      if (level + 1 === layers.length) layers.push(promoted);
+      else layers[level + 1] = polygonClipping.union(layers[level + 1], promoted);
+    }
+    if (layers.length === 0) layers.push(polygonClipping.union(polygon));
+    else layers[0] = polygonClipping.union(layers[0], polygon);
+  });
+  return layers;
+}
+
+/** The region covered exactly `count` times, given `coverageLayers` output. */
+function exactCoverage(layers: readonly MultiPolygon[], count: number): MultiPolygon {
+  const atLeast = layers[count - 1];
+  if (!atLeast || atLeast.length === 0) return [];
+  const deeper = layers[count];
+  if (!deeper || deeper.length === 0) return atLeast;
+  return polygonClipping.difference(atLeast, deeper);
+}
+
+/**
+ * Resolves rings under the non-zero fill rule: a point is filled unless its
+ * winding number is zero, i.e. unless equally many clockwise and
+ * counter-clockwise rings cover it. Counting coverage per orientation keeps
+ * winding multiplicity intact, so a region wrapped twice one way and once the
+ * other stays filled rather than collapsing into a hole.
+ */
+function combineNonZero(
+  geometries: readonly ClipPolygon[],
+  rawRings: readonly SectionPoint[][],
+): MultiPolygon {
+  const positives: ClipPolygon[] = [];
+  const negatives: ClipPolygon[] = [];
+  rawRings.forEach((points, index) => {
+    (signedSectionRingArea(points) >= 0 ? positives : negatives).push(geometries[index]);
+  });
+  const covered = polygonClipping.union(geometries[0], ...geometries.slice(1));
+  if (positives.length === 0 || negatives.length === 0) return covered;
+
+  const positiveLayers = coverageLayers(positives);
+  const negativeLayers = coverageLayers(negatives);
+  const balancedDepth = Math.min(positiveLayers.length, negativeLayers.length);
+  let balanced: MultiPolygon = [];
+  for (let count = 1; count <= balancedDepth; count += 1) {
+    const positiveExact = exactCoverage(positiveLayers, count);
+    if (positiveExact.length === 0) continue;
+    const negativeExact = exactCoverage(negativeLayers, count);
+    if (negativeExact.length === 0) continue;
+    const cancelled = polygonClipping.intersection(positiveExact, negativeExact);
+    if (cancelled.length === 0) continue;
+    balanced = balanced.length === 0 ? cancelled : polygonClipping.union(balanced, cancelled);
+  }
+  return balanced.length === 0 ? covered : polygonClipping.difference(covered, balanced);
+}
+
+/**
+ * Converts a closed Fabric path into section rings. Curve segments are
+ * flattened with the same adaptive tolerance as the other curved shapes, and
+ * the fill rule of compound paths is resolved through polygon clipping so
+ * holes keep their role.
+ */
+function pathToRings(object: fabric.Path, toleranceMm: number): ConvertedRings {
+  const matrix = object.calcTransformMatrix();
+  assertUsableMatrix(matrix);
+  const commands = object.path as unknown as SimplePathCommand[];
+  const offset = object.pathOffset ?? new fabric.Point(0, 0);
+  const toDocument = (x: number, y: number): SectionPoint =>
+    transformFabricLocalPoint(x - offset.x, y - offset.y, matrix);
+
+  const rawRings: SectionPoint[][] = [];
+  let approximate = false;
+  let ring: SectionPoint[] | null = null;
+  let current: { x: number; y: number } | null = null;
+  let subpathStart: { x: number; y: number } | null = null;
+
+  const openPathError = (): SectionGeometryError => new SectionGeometryError(
+    'unsupported-object',
+    'Only closed paths can be used. Close every subpath before running the operation.',
+  );
+
+  const finishRing = (explicitClose: boolean): void => {
+    if (!ring) return;
+    if (!explicitClose) {
+      if (!current || !subpathStart) throw openPathError();
+      if (
+        Math.abs(current.x - subpathStart.x) > PATH_CLOSURE_EPSILON
+        || Math.abs(current.y - subpathStart.y) > PATH_CLOSURE_EPSILON
+      ) {
+        throw openPathError();
+      }
+    }
+    if (ring.length >= 3) rawRings.push(ring);
+    ring = null;
+  };
+
+  for (const command of commands) {
+    const type = command[0];
+    if (type === 'M') {
+      finishRing(false);
+      current = { x: command[1] as number, y: command[2] as number };
+      subpathStart = current;
+      ring = [toDocument(current.x, current.y)];
+    } else if (type === 'L') {
+      if (!ring || !current) throw openPathError();
+      const end = { x: command[1] as number, y: command[2] as number };
+      const point = toDocument(end.x, end.y);
+      const previous = ring[ring.length - 1];
+      if (!pointsCoincide(previous, point)) ring.push(point);
+      current = end;
+    } else if (type === 'C' || type === 'Q') {
+      if (!ring || !current) throw openPathError();
+      // Affine transforms map Béziers to Béziers, so the control points are
+      // taken to document space first and the flatness tolerance stays in mm.
+      const start = current;
+      if (type === 'C') {
+        const end = { x: command[5] as number, y: command[6] as number };
+        appendAdaptiveCubic(
+          ring,
+          toDocument(start.x, start.y),
+          toDocument(command[1] as number, command[2] as number),
+          toDocument(command[3] as number, command[4] as number),
+          toDocument(end.x, end.y),
+          toleranceMm,
+        );
+        current = end;
+      } else {
+        const end = { x: command[3] as number, y: command[4] as number };
+        appendAdaptiveQuadratic(
+          ring,
+          toDocument(start.x, start.y),
+          toDocument(command[1] as number, command[2] as number),
+          toDocument(end.x, end.y),
+          toleranceMm,
+        );
+        current = end;
+      }
+      approximate = true;
+    } else if (type === 'Z' || type === 'z') {
+      finishRing(true);
+      current = subpathStart;
+    } else {
+      throw new SectionGeometryError(
+        'invalid-path',
+        `Unsupported path command "${type}".`,
+      );
+    }
+  }
+  finishRing(false);
+
+  if (rawRings.length === 0) {
+    throw new SectionGeometryError(
+      'degenerate-ring',
+      'The path does not enclose any area.',
+    );
+  }
+
+  // Resolve the filled region according to the path's own fill rule so the
+  // converted rings match what the object renders. Work around the rings'
+  // bbox centre to reduce floating-point cancellation, mirroring the Boolean
+  // kernel.
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  rawRings.forEach((points) => points.forEach((point) => {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }));
+  const centreX = (minX + maxX) / 2;
+  const centreY = (minY + maxY) / 2;
+  const geometries: ClipPolygon[] = rawRings.map((points) => [[
+    ...points.map((point): Pair => [point.x - centreX, point.y - centreY]),
+    [points[0].x - centreX, points[0].y - centreY],
+  ]]);
+
+  let combined: MultiPolygon;
+  try {
+    if (geometries.length === 1) {
+      combined = polygonClipping.union(geometries[0]);
+    } else if (object.fillRule === 'evenodd') {
+      // Even-odd keeps areas covered by an odd number of rings: XOR.
+      combined = polygonClipping.xor(geometries[0], ...geometries.slice(1));
+    } else {
+      // Non-zero (the Fabric/SVG default) keeps areas whose winding number is
+      // not zero.
+      combined = combineNonZero(geometries, rawRings);
+    }
+  } catch (error) {
+    throw new SectionGeometryError(
+      'invalid-path',
+      error instanceof Error ? error.message : 'The path outline could not be resolved into a region.',
+    );
+  }
+
+  const rings: SectionRing[] = [];
+  combined.forEach((polygon) => polygon.forEach((ringPoints, ringIndex) => {
+    const points = ringPoints.map(([x, y]) => ({ x: x + centreX, y: y + centreY }));
+    if (points.length > 1) {
+      const first = points[0];
+      const last = points[points.length - 1];
+      if (first.x === last.x && first.y === last.y) points.pop();
+    }
+    if (points.length >= 3) {
+      rings.push({ role: ringIndex === 0 ? 'outer' : 'hole', points });
+    }
+  }));
+  if (rings.length === 0) {
+    throw new SectionGeometryError(
+      'degenerate-ring',
+      'The path does not enclose any area.',
+    );
+  }
+  return { rings, approximate, analysisToleranceMm: toleranceMm };
+}
+
 function readLocalProfileMetadata(object: fabric.FabricObject): SectionProfileData | null {
   const metadata = getFabricMetadata(object);
   if (metadata.objectKind !== 'sectionProfile' || !metadata.sectionProfileData) return null;
@@ -356,9 +756,11 @@ export function isSupportedSectionSourceObject(object: fabric.FabricObject): boo
     const children = object.getObjects();
     return children.length > 0 && children.every(isSupportedSectionSourceObject);
   }
+  if (object instanceof fabric.Path) return isClosedFabricPath(object);
   return object instanceof fabric.Rect
     || object instanceof fabric.Circle
     || object instanceof fabric.Ellipse
+    || object instanceof fabric.Triangle
     || object instanceof fabric.Polygon;
 }
 
@@ -463,12 +865,14 @@ function convertObject(object: fabric.FabricObject, toleranceMm: number): Conver
   if (object instanceof fabric.Ellipse) {
     return ellipseToRing(object, object.rx, object.ry, toleranceMm);
   }
+  if (object instanceof fabric.Triangle) return triangleToRing(object, toleranceMm);
   if (object instanceof fabric.Polygon) return polygonToRing(object, toleranceMm);
+  if (object instanceof fabric.Path) return pathToRings(object, toleranceMm);
 
   const type = object.type || object.constructor.name;
   throw new SectionGeometryError(
     'unsupported-object',
-    `${type} is not a supported closed section shape. Use a rectangle, rounded rectangle, circle, ellipse, polygon, or supported group.`,
+    `${type} is not a supported closed section shape. Use a rectangle, rounded rectangle, circle, ellipse, triangle, polygon, or supported group.`,
   );
 }
 

@@ -10,6 +10,7 @@ import {
   SectionGeometryError,
 } from './sectionGeometry';
 import { createSectionPath } from './sectionShapeFactory';
+import { cubicPointAt } from './pathCommands';
 
 function profileArea(profile: ReturnType<typeof fabricObjectsToSectionProfile>): number {
   return profile.rings.reduce(
@@ -173,7 +174,7 @@ describe('sectionGeometry', () => {
   it.each([
     ['open polyline', new fabric.Polyline([{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }])],
     ['line', new fabric.Line([0, 0, 20, 20])],
-    ['arbitrary path', new fabric.Path('M 0 0 L 10 0 L 0 10 Z')],
+    ['open path', new fabric.Path('M 0 0 L 10 0 L 0 10')],
   ])('rejects unsupported %s geometry', (_label, object) => {
     expect(() => sectionProfileFromFabricObject(object)).toThrowError(SectionGeometryError);
     try {
@@ -181,6 +182,126 @@ describe('sectionGeometry', () => {
     } catch (error) {
       expect((error as SectionGeometryError).code).toBe('unsupported-object');
     }
+  });
+
+  it('converts a closed path into a section profile', () => {
+    const path = new fabric.Path('M 0 0 L 10 0 L 0 10 Z', { strokeWidth: 0 });
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings).toHaveLength(1);
+    expect(profile.rings[0].role).toBe('outer');
+    expect(Math.abs(signedSectionRingArea(profile.rings[0].points))).toBeCloseTo(50, 9);
+  });
+
+  it('converts a Fabric triangle into a section profile', () => {
+    const triangle = new fabric.Triangle({
+      left: 10,
+      top: 20,
+      width: 40,
+      height: 30,
+      strokeWidth: 0,
+    });
+    const profile = sectionProfileFromFabricObject(triangle);
+    expect(profile.approximate).toBe(false);
+    expect(profile.rings).toHaveLength(1);
+    expect(profileArea(profile)).toBeCloseTo(600, 8);
+  });
+
+  // Same subpaths, opposite fill rules: nested same-direction rings.
+  const NESTED_SAME_DIRECTION = 'M 0 0 L 100 0 L 100 100 L 0 100 Z M 20 20 L 80 20 L 80 80 L 20 80 Z';
+
+  it('keeps nested same-direction subpaths filled under the nonzero fill rule', () => {
+    // Fabric's default fillRule is 'nonzero': the inner ring winds the same
+    // way as the outer one, so the whole square renders filled.
+    const path = new fabric.Path(NESTED_SAME_DIRECTION, { strokeWidth: 0 });
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings.every((ring) => ring.role === 'outer')).toBe(true);
+    expect(profileArea(profile)).toBeCloseTo(10_000, 6);
+  });
+
+  it('carves a hole from nested same-direction subpaths under the evenodd fill rule', () => {
+    const path = new fabric.Path(NESTED_SAME_DIRECTION, { strokeWidth: 0, fillRule: 'evenodd' });
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings.map((ring) => ring.role).sort()).toEqual(['hole', 'outer']);
+    expect(profileArea(profile)).toBeCloseTo(10_000 - 3_600, 6);
+  });
+
+  it('carves a hole from an opposite-direction subpath under the nonzero fill rule', () => {
+    const path = new fabric.Path(
+      'M 0 0 L 100 0 L 100 100 L 0 100 Z M 20 80 L 80 80 L 80 20 L 20 20 Z',
+      { strokeWidth: 0 },
+    );
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings.map((ring) => ring.role).sort()).toEqual(['hole', 'outer']);
+    expect(profileArea(profile)).toBeCloseTo(10_000 - 3_600, 6);
+  });
+
+  it('keeps a triply nested nonzero path filled where the winding number stays non-zero', () => {
+    // Winding numbers 1 → 2 → 1 from the outside in: the innermost reversed
+    // ring only cancels one of the two same-direction wraps, so the whole
+    // 100×100 square renders filled.
+    const path = new fabric.Path(
+      [
+        'M 0 0 L 100 0 L 100 100 L 0 100 Z',
+        'M 10 10 L 90 10 L 90 90 L 10 90 Z',
+        'M 20 80 L 80 80 L 80 20 L 20 20 Z',
+      ].join(' '),
+      { strokeWidth: 0 },
+    );
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings.every((ring) => ring.role === 'outer')).toBe(true);
+    expect(profileArea(profile)).toBeCloseTo(10_000, 6);
+  });
+
+  it('carves a hole where reversed rings cancel every same-direction wrap', () => {
+    // Two same-direction wraps cancelled by two reversed rings: winding number
+    // zero inside the 60×60 square, so it becomes a hole.
+    const reversed = 'M 20 80 L 80 80 L 80 20 L 20 20 Z';
+    const path = new fabric.Path(
+      [
+        'M 0 0 L 100 0 L 100 100 L 0 100 Z',
+        'M 10 10 L 90 10 L 90 90 L 10 90 Z',
+        reversed,
+        reversed,
+      ].join(' '),
+      { strokeWidth: 0 },
+    );
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings.map((ring) => ring.role).sort()).toEqual(['hole', 'outer']);
+    expect(profileArea(profile)).toBeCloseTo(10_000 - 3_600, 6);
+  });
+
+  it('flattens inflected Bézier segments instead of collapsing them to the chord', () => {
+    // At t = 0.5 this S-curve passes exactly through the chord midpoint, so a
+    // midpoint-only subdivision test would never split it and the two lobes
+    // would collapse into a zero-area line.
+    const start = { x: 0, y: 0 };
+    const control1 = { x: 0, y: 100 };
+    const control2 = { x: 10, y: -100 };
+    const end = { x: 10, y: 0 };
+    const path = new fabric.Path('M 0 0 C 0 100 10 -100 10 0 Z', { strokeWidth: 0 });
+
+    const profile = sectionProfileFromFabricObject(path);
+
+    // Reference: densely sample one lobe (t in [0, 0.5] plus the chord back
+    // to the start) and double it — the lobes are point-symmetric.
+    const samples: { x: number; y: number }[] = [];
+    for (let index = 0; index <= 2_000; index += 1) {
+      samples.push(cubicPointAt(start, control1, control2, end, index / 4_000));
+    }
+    let doubled = 0;
+    for (let index = 0; index < samples.length; index += 1) {
+      const a = samples[index];
+      const b = samples[(index + 1) % samples.length];
+      doubled += a.x * b.y - b.x * a.y;
+    }
+    const referenceArea = Math.abs(doubled);
+
+    const area = profile.rings.reduce(
+      (sum, ring) => sum + Math.abs(signedSectionRingArea(ring.points)),
+      0,
+    );
+    expect(area).toBeGreaterThan(1);
+    expect(area).toBeCloseTo(referenceArea, 1);
   });
 
   it('rejects self-intersecting polygons before analysis', () => {

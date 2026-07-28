@@ -20,6 +20,11 @@ import {
   unionSelectionAsSection,
 } from '../utils/sectionCommands';
 import { isSupportedSectionSourceObject } from '../utils/sectionGeometry';
+import {
+  applyBooleanOperationToSelection,
+  isBooleanSourceObject,
+  type ShapeBooleanOperation,
+} from '../utils/shapeBoolean';
 import { openSectionOperations } from '../utils/sectionUiEvents';
 import { openTraceDialog } from '../utils/traceUiEvents';
 
@@ -82,6 +87,9 @@ export default function ContextMenu() {
   const isGroup = active instanceof fabric.Group;
   const isMultiple = active instanceof fabric.ActiveSelection;
   const canFillet = !!active && !isMultiple && isSupportedSectionSourceObject(active);
+  const canBoolean = isMultiple
+    && (active as fabric.ActiveSelection).getObjects().length >= 2
+    && (active as fabric.ActiveSelection).getObjects().every(isBooleanSourceObject);
   const traceSource = pos.sourceImage
     ?? (active instanceof fabric.Image ? active : undefined);
 
@@ -119,6 +127,14 @@ export default function ContextMenu() {
     () => unionSelectionAsSection(canvas, pushHistory),
   );
   const handleSectionFillet = () => exec(openSectionOperations);
+  const runBooleanOperation = (operation: ShapeBooleanOperation) => exec(() => {
+    try {
+      applyBooleanOperationToSelection(canvas, pushHistory, operation);
+      showToast(t('booleanOperationDone'), 'success');
+    } catch (caught: unknown) {
+      showToast(caught instanceof Error ? caught.message : t('booleanOperationFailed'), 'error');
+    }
+  });
 
   return (
     <div className="context-menu" style={{ left: pos.x, top: pos.y }} onClick={(e) => e.stopPropagation()}>
@@ -136,6 +152,15 @@ export default function ContextMenu() {
           <button className="context-item" onClick={handleSendBackward}>{t('ctx_backward')}</button>
           <button className="context-item" onClick={handleSendToBack}>{t('ctx_toBack')}</button>
           <div className="context-divider" />
+          {canBoolean && (
+            <>
+              <button className="context-item" onClick={() => runBooleanOperation('union')}>{t('boolUnion')}</button>
+              <button className="context-item" onClick={() => runBooleanOperation('subtract')}>{t('boolSubtract')}</button>
+              <button className="context-item" onClick={() => runBooleanOperation('intersect')}>{t('boolIntersect')}</button>
+              <button className="context-item" onClick={() => runBooleanOperation('exclude')}>{t('boolExclude')}</button>
+              <div className="context-divider" />
+            </>
+          )}
           {isMultiple && <button className="context-item" onClick={handleGroup}>{t('ctx_group')}</button>}
           {isGroup && <button className="context-item" onClick={handleUngroup}>{t('ctx_ungroup')}</button>}
           <button className="context-item" onClick={handleLock}>{active.lockMovementX ? t('ctx_unlock') : t('ctx_lock')}</button>

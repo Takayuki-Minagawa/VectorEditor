@@ -15,10 +15,13 @@ export function configureCanvasForTool(canvas: fabric.Canvas, tool: ToolType): v
     canvas.freeDrawingBrush = brush;
   }
 
+  // Node editing keeps objects clickable so a target can be picked, but the
+  // rubber-band multi selection and standard transform handles stay off; the
+  // node-edit interaction layer attaches per-node controls on selection.
+  const interactive = tool === 'select' || tool === 'nodeEdit';
   canvas.selection = tool === 'select';
-  canvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair';
+  canvas.defaultCursor = interactive ? 'default' : 'crosshair';
   canvas.forEachObject((obj) => {
-    const selecting = tool === 'select';
     const metadata = getFabricMetadata(obj);
     const locked = metadata.locked ?? Boolean(
       obj.lockMovementX
@@ -28,9 +31,9 @@ export function configureCanvasForTool(canvas: fabric.Canvas, tool: ToolType): v
       || obj.lockRotation,
     );
     obj.set({
-      selectable: selecting,
-      evented: selecting,
-      hasControls: selecting && !locked,
+      selectable: interactive,
+      evented: interactive,
+      hasControls: tool === 'select' && !locked,
     });
   });
 

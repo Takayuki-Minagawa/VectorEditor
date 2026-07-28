@@ -7,23 +7,8 @@ import type { ToolCategory, ToolDefinition } from '../domain/tools';
 import Dialog from './Dialog';
 import IconButton from './IconButton';
 import SymbolLibrary from './SymbolLibrary';
+import { loadVisibleTools, saveVisibleTools } from '../utils/visibleToolsStorage';
 
-const STORAGE_KEY = 'vectoreditor-visible-tools-v3';
-const ALL_TOOL_IDS = ALL_TOOLS.map((t) => t.tool);
-
-function loadVisibleTools(): Set<ToolType> {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved) as unknown;
-      if (Array.isArray(parsed)) {
-        const known = parsed.filter((tool): tool is ToolType => ALL_TOOL_IDS.includes(tool as ToolType));
-        return new Set<ToolType>(['select', ...known]);
-      }
-    }
-  } catch { /* ignore */ }
-  return new Set(ALL_TOOL_IDS);
-}
 
 export default function ToolPanel() {
   const activeTool = useEditorStore((s) => s.activeTool);
@@ -33,7 +18,7 @@ export default function ToolPanel() {
   const [visibleTools, setVisibleTools] = useState<Set<ToolType>>(loadVisibleTools);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...visibleTools]));
+    saveVisibleTools(visibleTools);
   }, [visibleTools]);
 
   const toggleTool = (tool: ToolType) => {

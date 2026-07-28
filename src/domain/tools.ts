@@ -16,6 +16,7 @@ export interface ToolDefinition {
 
 export const TOOL_DEFINITIONS = {
   select: { tool: 'select', labelKey: 'tool_select', icon: '⊹', category: 'basic', gesture: 'select' },
+  nodeEdit: { tool: 'nodeEdit', labelKey: 'tool_nodeEdit', icon: '⬦', category: 'basic', gesture: 'select' },
   line: { tool: 'line', labelKey: 'tool_line', icon: '╲', category: 'basic', gesture: 'drag', supportsOrtho: true, objectKind: 'line' },
   arrow: { tool: 'arrow', labelKey: 'tool_arrow', icon: '→', category: 'basic', gesture: 'drag', supportsOrtho: true, objectKind: 'arrow' },
   pencil: { tool: 'pencil', labelKey: 'tool_pencil', icon: '✎', category: 'basic', gesture: 'freehand', objectKind: 'pencil' },

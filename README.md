@@ -27,6 +27,8 @@ Vector Illustration Editor v1.1.0 is a browser-based editor for diagrams, illust
 - Select, move, resize, rotate, delete, duplicate, copy/paste, flip, group/ungroup, z-order, alignment, and distribution operations
 - Architecture tools for walls, columns, dimensions, and connectors
 - LaTeX expressions rendered with KaTeX; the source and font size remain in document metadata
+- Node editing: drag the vertices of lines, polylines, polygons, and paths; double-click a segment to insert a node (a line becomes a polyline, Bezier segments are split without changing their shape) and double-click a node to delete it
+- Boolean operations between two or more closed shapes: unite, subtract front, intersect, and exclude, producing one editable even-odd compound path
 - Numeric move/copy and crossing-window stretch operations
 - Canvas presets for A4/A3, US Letter, slides, common web/SNS sizes, and custom dimensions
 - Grid, grid snap, smart guides, rulers, guide lines, Ortho constraints, and live cursor coordinates

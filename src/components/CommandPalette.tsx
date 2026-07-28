@@ -18,6 +18,10 @@ import {
   unionSelectionAsSection,
 } from '../utils/sectionCommands';
 import { isSupportedSectionSourceObject } from '../utils/sectionGeometry';
+import {
+  applyBooleanOperationToSelection,
+  type ShapeBooleanOperation,
+} from '../utils/shapeBoolean';
 import { openSectionOperations } from '../utils/sectionUiEvents';
 import { openTraceDialog } from '../utils/traceUiEvents';
 import Dialog from './Dialog';
@@ -127,6 +131,26 @@ export default function CommandPalette() {
           openTraceDialog(active instanceof fabric.Image ? active : undefined);
         },
       },
+      ...(([
+        ['union', 'boolUnion'],
+        ['subtract', 'boolSubtract'],
+        ['intersect', 'boolIntersect'],
+        ['exclude', 'boolExclude'],
+      ] as const satisfies ReadonlyArray<readonly [ShapeBooleanOperation, 'boolUnion' | 'boolSubtract' | 'boolIntersect' | 'boolExclude']>).map(([operation, labelKey]): EditorAction => ({
+        id: `bool-${operation}`,
+        label: t(labelKey),
+        keywords: 'boolean pathfinder union subtract intersect exclude ブーリアン 合体 型抜き 交差 中マド',
+        disabled: !canvas || selectionCount < 2,
+        perform: () => {
+          if (!canvas) return;
+          try {
+            applyBooleanOperationToSelection(canvas, pushHistory, operation);
+            showToast(t('booleanOperationDone'), 'success');
+          } catch (caught: unknown) {
+            showToast(caught instanceof Error ? caught.message : t('booleanOperationFailed'), 'error');
+          }
+        },
+      }))),
       {
         id: 'section-create',
         label: t('sectionCreate'),

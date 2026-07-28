@@ -176,6 +176,32 @@ describe('R12 ASCII DXF export', () => {
     ]);
   });
 
+  it('exports a closed compound path, such as a Boolean result, as closed polylines', () => {
+    const path = new fabric.Path(
+      'M 0 0 L 100 0 L 100 100 L 0 100 Z M 25 25 L 75 25 L 75 75 L 25 75 Z',
+      { strokeWidth: 0, fillRule: 'evenodd' },
+    );
+
+    const result = exportObjectsToDxf([path], 400, 300);
+
+    expect(result.unsupportedTypes).toEqual([]);
+    // Outline and hole ring, both closed.
+    expect(entityValues(result.text, 'POLYLINE', 70)).toEqual([1, 1]);
+    const xs = entityValues(result.text, 'VERTEX', 10);
+    const ys = entityValues(result.text, 'VERTEX', 20);
+    expect(xs).toHaveLength(8);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(100, 6);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(100, 6);
+    expect(result.approximatedTypes).toContain('PathHoles');
+  });
+
+  it('keeps open paths out of the DXF output as unsupported objects', () => {
+    const open = new fabric.Path('M 0 0 C 10 10 20 10 30 0', { strokeWidth: 0 });
+    const result = exportObjectsToDxf([open], 400, 300);
+    expect(result.unsupportedTypes).toEqual(['Path']);
+    expect(result.text).not.toMatch(/0\r\nPOLYLINE\r\n/);
+  });
+
   it('skips an invalid transformed section while continuing to export other objects', () => {
     const section = new fabric.Rect({
       width: 40,

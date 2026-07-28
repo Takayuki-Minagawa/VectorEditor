@@ -37,6 +37,10 @@ const defaultProps: ObjProps = {
 export default function PropertyPanel() {
   const canvas = useEditorStore((s) => s.canvas);
   const selectedObjectIds = useEditorStore((s) => s.selectedObjectIds);
+  // History revision: node edits (insert/delete) change an object's geometry
+  // without firing object:modified or changing the selection, so the panel
+  // re-reads whenever a history entry is pushed or undone.
+  const revision = useEditorStore((s) => s.revision);
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const canvasWidth = useEditorStore((s) => s.canvasWidth);
   const canvasHeight = useEditorStore((s) => s.canvasHeight);
@@ -91,7 +95,7 @@ export default function PropertyPanel() {
   }, [canvas]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- readProps reads external canvas state
-  useEffect(() => { readProps(); }, [selectedObjectIds, readProps]);
+  useEffect(() => { readProps(); }, [selectedObjectIds, revision, readProps]);
 
   useEffect(() => {
     if (!canvas) return;

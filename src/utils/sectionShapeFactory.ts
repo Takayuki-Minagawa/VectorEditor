@@ -23,7 +23,8 @@ function svgNumber(value: number): string {
   return Number(value.toPrecision(15)).toString();
 }
 
-function profilePathData(profile: SectionProfileData): string {
+/** Serialises profile rings as an M/L/Z path string in Fabric's y-down space. */
+export function sectionProfileToPathData(profile: SectionProfileData): string {
   return profile.rings.map((ring) => {
     const [first, ...rest] = ring.points;
     const commands = [`M ${svgNumber(first.x)} ${svgNumber(-first.y)}`];
@@ -55,7 +56,7 @@ export function createSectionPath(
 ): SectionProfilePath {
   const profile = normalizeSectionProfileData(profileValue);
   const { id, name, ...pathOptions } = options;
-  const path = new fabric.Path(profilePathData(profile), {
+  const path = new fabric.Path(sectionProfileToPathData(profile), {
     objectCaching: false,
     ...pathOptions,
     // A non-zero winding fill would hide holes after export in renderers that
