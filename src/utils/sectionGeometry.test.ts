@@ -235,6 +235,41 @@ describe('sectionGeometry', () => {
     expect(profileArea(profile)).toBeCloseTo(10_000 - 3_600, 6);
   });
 
+  it('keeps a triply nested nonzero path filled where the winding number stays non-zero', () => {
+    // Winding numbers 1 → 2 → 1 from the outside in: the innermost reversed
+    // ring only cancels one of the two same-direction wraps, so the whole
+    // 100×100 square renders filled.
+    const path = new fabric.Path(
+      [
+        'M 0 0 L 100 0 L 100 100 L 0 100 Z',
+        'M 10 10 L 90 10 L 90 90 L 10 90 Z',
+        'M 20 80 L 80 80 L 80 20 L 20 20 Z',
+      ].join(' '),
+      { strokeWidth: 0 },
+    );
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings.every((ring) => ring.role === 'outer')).toBe(true);
+    expect(profileArea(profile)).toBeCloseTo(10_000, 6);
+  });
+
+  it('carves a hole where reversed rings cancel every same-direction wrap', () => {
+    // Two same-direction wraps cancelled by two reversed rings: winding number
+    // zero inside the 60×60 square, so it becomes a hole.
+    const reversed = 'M 20 80 L 80 80 L 80 20 L 20 20 Z';
+    const path = new fabric.Path(
+      [
+        'M 0 0 L 100 0 L 100 100 L 0 100 Z',
+        'M 10 10 L 90 10 L 90 90 L 10 90 Z',
+        reversed,
+        reversed,
+      ].join(' '),
+      { strokeWidth: 0 },
+    );
+    const profile = sectionProfileFromFabricObject(path);
+    expect(profile.rings.map((ring) => ring.role).sort()).toEqual(['hole', 'outer']);
+    expect(profileArea(profile)).toBeCloseTo(10_000 - 3_600, 6);
+  });
+
   it('flattens inflected Bézier segments instead of collapsing them to the chord', () => {
     // At t = 0.5 this S-curve passes exactly through the chord midpoint, so a
     // midpoint-only subdivision test would never split it and the two lobes

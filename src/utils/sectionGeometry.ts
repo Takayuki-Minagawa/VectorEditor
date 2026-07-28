@@ -508,10 +508,75 @@ export function isClosedFabricPath(object: fabric.Path): boolean {
 }
 
 /**
+ * Regions covered by at least `index + 1` of `polygons`, indexed by `index`.
+ * Coverage counts are accumulated incrementally from deepest to shallowest so
+ * a layer is only ever combined with the previous iteration's values, and
+ * mutually disjoint rings — the common case — cost one union each.
+ */
+function coverageLayers(polygons: readonly ClipPolygon[]): MultiPolygon[] {
+  const layers: MultiPolygon[] = [];
+  polygons.forEach((polygon) => {
+    for (let level = layers.length - 1; level >= 0; level -= 1) {
+      const promoted = polygonClipping.intersection(layers[level], polygon);
+      if (promoted.length === 0) continue;
+      if (level + 1 === layers.length) layers.push(promoted);
+      else layers[level + 1] = polygonClipping.union(layers[level + 1], promoted);
+    }
+    if (layers.length === 0) layers.push(polygonClipping.union(polygon));
+    else layers[0] = polygonClipping.union(layers[0], polygon);
+  });
+  return layers;
+}
+
+/** The region covered exactly `count` times, given `coverageLayers` output. */
+function exactCoverage(layers: readonly MultiPolygon[], count: number): MultiPolygon {
+  const atLeast = layers[count - 1];
+  if (!atLeast || atLeast.length === 0) return [];
+  const deeper = layers[count];
+  if (!deeper || deeper.length === 0) return atLeast;
+  return polygonClipping.difference(atLeast, deeper);
+}
+
+/**
+ * Resolves rings under the non-zero fill rule: a point is filled unless its
+ * winding number is zero, i.e. unless equally many clockwise and
+ * counter-clockwise rings cover it. Counting coverage per orientation keeps
+ * winding multiplicity intact, so a region wrapped twice one way and once the
+ * other stays filled rather than collapsing into a hole.
+ */
+function combineNonZero(
+  geometries: readonly ClipPolygon[],
+  rawRings: readonly SectionPoint[][],
+): MultiPolygon {
+  const positives: ClipPolygon[] = [];
+  const negatives: ClipPolygon[] = [];
+  rawRings.forEach((points, index) => {
+    (signedSectionRingArea(points) >= 0 ? positives : negatives).push(geometries[index]);
+  });
+  const covered = polygonClipping.union(geometries[0], ...geometries.slice(1));
+  if (positives.length === 0 || negatives.length === 0) return covered;
+
+  const positiveLayers = coverageLayers(positives);
+  const negativeLayers = coverageLayers(negatives);
+  const balancedDepth = Math.min(positiveLayers.length, negativeLayers.length);
+  let balanced: MultiPolygon = [];
+  for (let count = 1; count <= balancedDepth; count += 1) {
+    const positiveExact = exactCoverage(positiveLayers, count);
+    if (positiveExact.length === 0) continue;
+    const negativeExact = exactCoverage(negativeLayers, count);
+    if (negativeExact.length === 0) continue;
+    const cancelled = polygonClipping.intersection(positiveExact, negativeExact);
+    if (cancelled.length === 0) continue;
+    balanced = balanced.length === 0 ? cancelled : polygonClipping.union(balanced, cancelled);
+  }
+  return balanced.length === 0 ? covered : polygonClipping.difference(covered, balanced);
+}
+
+/**
  * Converts a closed Fabric path into section rings. Curve segments are
  * flattened with the same adaptive tolerance as the other curved shapes, and
- * the even-odd fill semantics of compound paths are resolved through a
- * polygon-clipping XOR so holes keep their role.
+ * the fill rule of compound paths is resolved through polygon clipping so
+ * holes keep their role.
  */
 function pathToRings(object: fabric.Path, toleranceMm: number): ConvertedRings {
   const matrix = object.calcTransformMatrix();
@@ -638,21 +703,8 @@ function pathToRings(object: fabric.Path, toleranceMm: number): ConvertedRings {
       combined = polygonClipping.xor(geometries[0], ...geometries.slice(1));
     } else {
       // Non-zero (the Fabric/SVG default) keeps areas whose winding number is
-      // not zero. With single-multiplicity coverage per orientation this is
-      // the symmetric difference between the union of counter-clockwise rings
-      // and the union of clockwise rings: same-direction overlaps stay
-      // filled, opposite-direction rings carve holes.
-      const positives: ClipPolygon[] = [];
-      const negatives: ClipPolygon[] = [];
-      rawRings.forEach((points, index) => {
-        (signedSectionRingArea(points) >= 0 ? positives : negatives).push(geometries[index]);
-      });
-      const unionAll = (list: ClipPolygon[]): MultiPolygon => (list.length === 0
-        ? []
-        : polygonClipping.union(list[0], ...list.slice(1)));
-      if (negatives.length === 0) combined = unionAll(positives);
-      else if (positives.length === 0) combined = unionAll(negatives);
-      else combined = polygonClipping.xor(unionAll(positives), unionAll(negatives));
+      // not zero.
+      combined = combineNonZero(geometries, rawRings);
     }
   } catch (error) {
     throw new SectionGeometryError(
