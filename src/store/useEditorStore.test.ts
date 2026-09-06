@@ -237,6 +237,8 @@ describe('editor history transactions', () => {
     const objects: fabric.FabricObject[] = [];
     const canvas = {
       getObjects: () => objects,
+      forEachObject: (callback: (object: fabric.FabricObject) => void) => objects.forEach(callback),
+      requestRenderAll: vi.fn(),
       toObject: (properties: string[]) => ({
         version: '7.4.0',
         objects: objects.map((object) => object.toObject(properties)),

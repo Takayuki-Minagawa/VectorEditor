@@ -1,3 +1,4 @@
+import type { CadLayer } from '../domain/cadLayer';
 const DB_NAME = 'vectoreditor-symbol-library';
 const STORE_NAME = 'symbols';
 const DB_VERSION = 1;
@@ -6,6 +7,7 @@ export interface SymbolRecord {
   id: string;
   name: string;
   objects: unknown[];
+  cadLayers?: CadLayer[];
   thumbnail?: string;
   createdAt: string;
   updatedAt: string;

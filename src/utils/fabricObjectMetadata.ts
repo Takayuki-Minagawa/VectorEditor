@@ -45,8 +45,19 @@ export interface ConnectorData {
   route: ConnectorRoute;
 }
 
+export interface CadOwnAppearance {
+  stroke: string | null | ReturnType<fabric.Gradient<'linear' | 'radial'>['toObject']>;
+  fill?: string | null | ReturnType<fabric.Gradient<'linear' | 'radial'>['toObject']>;
+  strokeWidth: number;
+  strokeDashArray: number[] | null;
+}
+
 /** Properties whose meaning belongs to the document, not to the current UI. */
 export interface FabricSemanticMetadata {
+  cadLayerId?: string;
+  cadStyleMode?: 'object' | 'layer';
+  cadOwnAppearance?: CadOwnAppearance;
+  cadVisible?: boolean;
   id?: string;
   name?: string;
   objectKind?: string;
@@ -66,6 +77,10 @@ export type FabricObjectWithMetadata = fabric.FabricObject & FabricSemanticMetad
  * intentionally do not appear here.
  */
 export const FABRIC_CUSTOM_PROPERTIES = [
+  'cadLayerId',
+  'cadStyleMode',
+  'cadOwnAppearance',
+  'cadVisible',
   'id',
   'name',
   'objectKind',
@@ -90,6 +105,10 @@ fabric.FabricObject.customProperties = [
 export function getFabricMetadata(object: fabric.FabricObject): FabricSemanticMetadata {
   const metadata = object as FabricObjectWithMetadata;
   return {
+    cadLayerId: metadata.cadLayerId,
+    cadStyleMode: metadata.cadStyleMode,
+    cadOwnAppearance: metadata.cadOwnAppearance,
+    cadVisible: metadata.cadVisible,
     id: metadata.id,
     name: metadata.name,
     objectKind: metadata.objectKind,
@@ -135,6 +154,7 @@ function visitObjects(
 export function prepareObjectMetadataForSerialization(object: fabric.FabricObject): void {
   visitObjects(object, (current) => {
     const metadata = current as FabricObjectWithMetadata;
+    if (metadata.cadLayerId !== undefined && metadata.locked !== undefined) return;
     metadata.locked = Boolean(
       current.lockMovementX
       || current.lockMovementY

@@ -1,4 +1,5 @@
 import * as fabric from 'fabric';
+import { defaultCadLayers } from '../domain/cadLayer';
 import { describe, expect, it, vi } from 'vitest';
 import type { SectionProfileData } from '../domain/section';
 import {
@@ -67,6 +68,7 @@ function currentDocument(objects: unknown[]): string {
   return JSON.stringify({
     documentId: 'doc_current',
     version: DOCUMENT_VERSION,
+    cadLayers: defaultCadLayers(), activeCadLayerId: '0',
     canvas: { width: 800, height: 600, backgroundColor: '#ffffff' },
     objects: { version: '7.2.0', objects },
     drawingMode: 'cad',

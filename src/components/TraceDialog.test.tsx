@@ -229,7 +229,7 @@ describe('TraceDialog', () => {
     });
     const insertTracedDrawing = vi.fn(() => [{} as fabric.FabricObject]);
     useEditorStore.setState({
-      canvas: {} as fabric.Canvas,
+      canvas: { getObjects: () => [], forEachObject: vi.fn(), requestRenderAll: vi.fn() } as unknown as fabric.Canvas,
       insertTracedDrawing,
       showToast: vi.fn(),
     });

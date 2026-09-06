@@ -8,6 +8,7 @@ import {
 import { updateLinkedSemanticObjects } from './semanticObjects';
 import { historyService } from './historyService';
 import { collectFabricObjectTree } from './fabricObjectTree';
+import { applyCadLayers, isCadLayerLocked, rememberClipboardLayers, copiedCadLayers, setCopiedCadLayers, mergeObjectLayers } from './cadLayers';
 
 export type PushHistory = () => void;
 export type SetClipboard = (objects: fabric.FabricObject[] | null) => void;
@@ -33,6 +34,10 @@ export interface CanvasCommandOptions<T> {
 export type SemanticUpdateScope = 'all' | 'none' | readonly string[];
 
 let defaultPushHistory: PushHistory | undefined;
+let clipboardMarker: string | null = null;
+let pendingCopy: Promise<void> = Promise.resolve();
+export const currentClipboardMarker = () => clipboardMarker;
+export const waitForClipboardCopy = () => pendingCopy;
 
 export function createAsyncCanvasMutationGuard(canvas: fabric.StaticCanvas): () => boolean {
   const epoch = historyService.currentMutationEpoch;
@@ -62,6 +67,7 @@ function commitCommand(
       updateLinkedSemanticObjects(canvas, undefined, changedIds);
     }
   }
+  applyCadLayers(canvas);
   if (render) canvas.requestRenderAll();
   if (recordHistory) (pushHistory ?? defaultPushHistory)?.();
 }
@@ -173,7 +179,7 @@ export function selectAll(canvas: fabric.Canvas): boolean {
     { canvas },
     () => {
       canvas.discardActiveObject();
-      const objects = canvas.getObjects();
+      const objects = canvas.getObjects().filter((object) => object.visible !== false && !isCadLayerLocked(object));
       if (objects.length === 0) return false;
       canvas.setActiveObject(new fabric.ActiveSelection(objects, { canvas }));
       return true;
@@ -182,17 +188,27 @@ export function selectAll(canvas: fabric.Canvas): boolean {
   );
 }
 
-export function copyActive(canvas: fabric.Canvas, setClipboard: SetClipboard): boolean {
+export function copyActive(canvas: fabric.Canvas, setClipboard: SetClipboard, writeMarker?: (marker: string) => void): boolean {
   const active = canvas.getActiveObject();
   if (!active) return false;
   const canCommit = createAsyncCanvasMutationGuard(canvas);
-  void active.clone().then((cloned: fabric.FabricObject) => {
-    if (!canCommit()) {
+  rememberClipboardLayers(canvas, active);
+  const layers = copiedCadLayers(active);
+  const marker = `VectorEditor selection: ${crypto.randomUUID()}`;
+  clipboardMarker = marker;
+  setClipboard(null);
+  if (writeMarker) writeMarker(marker);
+  else if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) void navigator.clipboard.writeText(marker).catch(() => undefined);
+  pendingCopy = active.clone().then((cloned: fabric.FabricObject) => {
+    if (!canCommit() || clipboardMarker !== marker) {
+      if (clipboardMarker === marker) clipboardMarker = null;
       cloned.dispose();
       return;
     }
+    // The clone and its layer definitions are a single clipboard snapshot.
+    setCopiedCadLayers(cloned, layers);
     setClipboard([cloned]);
-  }).catch(() => undefined);
+  }).catch(() => { if (clipboardMarker === marker) clipboardMarker = null; });
   return true;
 }
 
@@ -214,12 +230,14 @@ export function pasteClipboard(
         return false;
       }
       reassignObjectIdsRecursive(cloned);
+      mergeObjectLayers(canvas, [cloned], copiedCadLayers(clipboard[0]));
       cloned.set({
         left: (cloned.left || 0) + 20,
         top: (cloned.top || 0) + 20,
       });
       const active = addObjectOrSelection(canvas, cloned);
       canvas.setActiveObject(active);
+      rememberClipboardLayers(canvas, active);
       setClipboard([active]);
       semanticUpdateIds = collectSemanticUpdateIds([active]);
       return true;

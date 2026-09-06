@@ -1,3 +1,5 @@
+import type { CadLayer } from './domain/cadLayer';
+
 export type ToolType =
   | 'select'
   | 'nodeEdit'
@@ -146,6 +148,8 @@ export interface SerializedCanvasData extends Record<string, unknown> {
 }
 
 export interface DocumentData {
+  cadLayers?: CadLayer[];
+  activeCadLayerId?: string;
   documentId: string;
   canvas: {
     width: number;

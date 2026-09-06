@@ -1,3 +1,5 @@
+import { defaultCadLayers, validateCadLayers, type CadLayer } from '../domain/cadLayer';
+import { applyCadLayers, setCanvasLayerContext } from '../utils/cadLayers';
 import { create } from 'zustand';
 import * as fabric from 'fabric';
 import type {
@@ -32,6 +34,9 @@ export interface InsertTracedDrawingOptions {
 }
 
 export interface EditorStore {
+  cadLayers: CadLayer[];
+  activeCadLayerId: string;
+  setCadLayers: (layers: CadLayer[], activeId?: string, record?: boolean) => void;
   // Tool
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
@@ -217,6 +222,8 @@ function captureSnapshot(
     guides: state.guides,
     snapToGuides: state.snapToGuides,
     orthoMode: state.orthoMode,
+    cadLayers: state.cadLayers,
+    activeCadLayerId: state.activeCadLayerId,
   };
   const snapshot = reusableObjects
     ? createCanvasSnapshot(input, reusableObjects)
@@ -245,6 +252,11 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     // A settings-only entry can share the current immutable-by-convention
     // serialized payload. The live Fabric objects have not changed, so another
     // full canvas.toObject() traversal would only reproduce the same data.
+    if (change === 'objects') {
+      applyCadLayers(state.canvas);
+      // Node editing owns its selection and custom handles throughout a gesture.
+      if (state.activeTool === 'select') configureCanvasForTool(state.canvas, state.activeTool);
+    }
     const reusableObjects = change === 'settings'
       ? state.history[state.historyIndex]?.objects
       : undefined;
@@ -289,6 +301,8 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       guides: snapshot.guides?.map((guide) => ({ ...guide })) ?? state.guides,
       snapToGuides: snapshot.snapToGuides ?? state.snapToGuides,
       orthoMode: snapshot.orthoMode ?? state.orthoMode,
+      cadLayers: structuredClone(snapshot.cadLayers ?? defaultCadLayers()),
+      activeCadLayerId: snapshot.activeCadLayerId ?? '0',
       selectedObjectIds: [],
     });
   };
@@ -363,6 +377,14 @@ export const useEditorStore = create<EditorStore>((set, get) => {
   };
 
   return {
+    cadLayers: defaultCadLayers(),
+    activeCadLayerId: '0',
+    setCadLayers: (layers, activeId = get().activeCadLayerId, record = true) => {
+      const validated = validateCadLayers(layers);
+      if (!validated.some((l) => l.id === activeId)) throw new Error('Active CAD layer is missing');
+      set({ cadLayers: validated, activeCadLayerId: activeId });
+      if (record) get().pushHistory();
+    },
     drawingMode: 'illustration',
     setDrawingMode: (mode) => {
       if (mode === get().drawingMode) return;
@@ -636,3 +658,14 @@ historyService.setDocumentRestoredListener((snapshot) => {
 
 // Apply persisted theme to the document on load
 applyThemeToDom(useEditorStore.getState().theme);
+
+// Keep derived layer presentation attached to the canvas, including document restores.
+useEditorStore.subscribe((state, previous) => {
+  if (!state.canvas) return;
+  if (state.canvas !== previous.canvas || state.cadLayers !== previous.cadLayers || state.activeCadLayerId !== previous.activeCadLayerId) {
+    setCanvasLayerContext(state.canvas, { layers: state.cadLayers, activeId: state.activeCadLayerId,
+      replace: (layers) => useEditorStore.getState().setCadLayers(layers, useEditorStore.getState().activeCadLayerId, false) });
+    applyCadLayers(state.canvas);
+    configureCanvasForTool(state.canvas, state.activeTool);
+  }
+});

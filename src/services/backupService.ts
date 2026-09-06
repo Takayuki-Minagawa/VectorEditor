@@ -1,4 +1,5 @@
 import type { DocumentData } from '../types';
+import { defaultCadLayers } from '../domain/cadLayer';
 import { MAX_DOCUMENT_BYTES, parseDocumentData } from '../utils/documentSerializer';
 import { deleteProject, insertProjectBundle, listProjects, listProjectSnapshots, type ProjectDocument, type ProjectSnapshot } from './projectRepository';
 import { deleteSymbol, insertSymbol, listSymbols, type SymbolRecord } from './symbolRepository';
@@ -71,10 +72,10 @@ export function parseBackup(raw: string): EditorBackup {
   const symbols = array(data.symbols, 1000).map((item): SymbolRecord => {
     const s = record(item);
     // Use exactly the document validator for Fabric payloads and section metadata.
-    const validated = document({ documentId: 'symbol-validation', version: 2,
+    const validated = document({ documentId: 'symbol-validation', version: 3, cadLayers: s.cadLayers ?? defaultCadLayers(), activeCadLayerId: '0',
       canvas: { width: 800, height: 600, backgroundColor: '#ffffff' }, objects: { objects: array(s.objects, 100000) } });
     return { id: string(s.id), name: string(s.name), createdAt: date(s.createdAt), updatedAt: date(s.updatedAt),
-      thumbnail: thumbnail(s.thumbnail), objects: validated.objects.objects };
+      thumbnail: thumbnail(s.thumbnail), objects: validated.objects.objects, cadLayers: validated.cadLayers };
   });
   unique(projects.map((b) => b.project.id));
   unique(projects.flatMap((b) => b.snapshots.map((s) => s.id)));

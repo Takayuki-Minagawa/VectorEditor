@@ -83,6 +83,8 @@ export default function ProjectManager() {
         guides: state.guides,
         snapToGuides: state.snapToGuides,
         orthoMode: state.orthoMode,
+        cadLayers: state.cadLayers,
+        activeCadLayerId: state.activeCadLayerId,
       }),
     };
   };
@@ -141,16 +143,7 @@ export default function ProjectManager() {
         setCadUnit: state.setCadUnit,
         setScale: state.setScale,
         setCadSize: state.setCadSize,
-        restoreEditorSettings: (snapshot) => useEditorStore.setState({
-          gridVisible: snapshot.gridVisible ?? false,
-          gridSize: snapshot.gridSize ?? 20,
-          snapToGrid: snapshot.snapToGrid ?? false,
-          snapToObjects: snapshot.snapToObjects ?? false,
-          showRulers: snapshot.showRulers ?? false,
-          guides: snapshot.guides ?? [],
-          snapToGuides: snapshot.snapToGuides ?? false,
-          orthoMode: snapshot.orthoMode ?? false,
-        }),
+        restoreEditorSettings: state.restoreEditorSettings,
       }, {
         rollbackSnapshot: captureCurrentEditorSnapshot() ?? undefined,
       });

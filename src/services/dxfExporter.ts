@@ -1,4 +1,6 @@
 import * as fabric from 'fabric';
+import { defaultCadLayers, type CadLayer } from '../domain/cadLayer';
+import { ACI_COLORS } from '../domain/dxf';
 import {
   isClosedFabricPath,
   readSectionProfileInDocumentCoordinates,
@@ -184,12 +186,13 @@ export function exportObjectsToDxf(
   objects: fabric.FabricObject[],
   drawingWidth: number,
   drawingHeight: number,
+  layers: readonly CadLayer[] = defaultCadLayers(),
 ): DxfExportResult {
   const entities: string[] = [];
   const unsupported = new Set<string>();
   const approximated = new Set<string>();
 
-  const visit = (object: fabric.FabricObject): void => {
+  const writeObject = (object: fabric.FabricObject): void => {
     if (!object.visible || object.excludeFromExport) return;
 
     const metadata = getFabricMetadata(object);
@@ -225,7 +228,7 @@ export function exportObjectsToDxf(
     }
 
     if (object instanceof fabric.Group) {
-      object.getObjects().forEach(visit);
+      object.getObjects().forEach((child) => visit(child));
       return;
     }
 
@@ -276,7 +279,7 @@ export function exportObjectsToDxf(
       return;
     }
 
-    if (object instanceof fabric.Polyline && !(object instanceof fabric.Polygon)) {
+    if (object instanceof fabric.Polyline) {
       const points = object.points.map((point) => dxfPoint(
         scenePoint(object, {
           x: point.x - object.pathOffset.x,
@@ -284,7 +287,7 @@ export function exportObjectsToDxf(
         }),
         drawingHeight,
       ));
-      addPolyline(entities, points, false);
+      addPolyline(entities, points, object instanceof fabric.Polygon);
       return;
     }
 
@@ -347,7 +350,58 @@ export function exportObjectsToDxf(
     unsupported.add(typeName(object));
   };
 
-  objects.forEach(visit);
+  const names = new Map<string, string>();
+  const usedNames = new Set<string>();
+  layers.forEach((layer, index) => {
+    let name = layer.id === '0' ? '0' : layer.name.replace(/[^a-zA-Z0-9_$-]/g, '_').slice(0, 31);
+    if (!name || usedNames.has(name.toUpperCase())) name = `LAYER_${index}`;
+    while (usedNames.has(name.toUpperCase())) name += '_';
+    if (name !== layer.name) approximated.add('LayerNameEncoding');
+    names.set(layer.id, name); usedNames.add(name.toUpperCase());
+  });
+  const aci = (color: string): number => {
+    color = '#' + new fabric.Color(color).toHex().toLowerCase();
+    if (color === '#000000' || color === '#ffffff') return 7;
+    const exact = ACI_COLORS.findIndex((value, index) => index > 0 && value === color.toLowerCase());
+    if (exact > 0) return exact;
+    approximated.add('LayerColor');
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return 7;
+    const rgb = (hex: string) => [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
+    const input = rgb(color);
+    let best = 7; let distance = Infinity;
+    for (let i = 1; i <= 7; i++) {
+      const error = rgb(ACI_COLORS[i]).reduce((sum, component, j) => sum + (component - input[j]) ** 2, 0);
+      if (error < distance) { best = i; distance = error; }
+    }
+    return best;
+  };
+  const visit = (object: fabric.FabricObject, parentId = '0'): void => {
+    const metadata = getFabricMetadata(object);
+    const id = metadata.cadLayerId ?? parentId;
+    const layer = layers.find((item) => item.id === id) ?? layers[0];
+    if (!object.visible || object.excludeFromExport || !layer.visible || !layer.printable) return;
+    if (object instanceof fabric.Group && metadata.objectKind !== 'sectionProfile') {
+      object.getObjects().forEach((child) => visit(child, id)); return;
+    }
+    const start = entities.length;
+    writeObject(object);
+    const written = entities.splice(start);
+    for (let i = 0; i < written.length; i += 2) {
+      entities.push(written[i], written[i] === '8' ? names.get(layer.id) ?? '0' : written[i + 1]);
+      if (written[i] === '0' && ['LINE', 'POLYLINE', 'CIRCLE', 'TEXT'].includes(written[i + 1]) && metadata.cadStyleMode !== 'layer') {
+        const color = object instanceof fabric.FabricText ? object.fill : object.stroke;
+        const dash = object.strokeDashArray;
+        entities.push(...pair(62, typeof color === 'string' ? aci(color) : 7), ...pair(6, dash?.length ? dash[0] <= 1 ? 'DOTTED' : 'DASHED' : 'CONTINUOUS'));
+        if (dash?.length && JSON.stringify(dash) !== JSON.stringify(dash[0] <= 1 ? [1, 3] : [8, 4])) approximated.add('LinePattern');
+      }
+    }
+    if (object.strokeWidth !== 1 && !(object instanceof fabric.FabricText)) approximated.add('LineWeight');
+  };
+  objects.forEach((object) => visit(object));
+  const layerTable = layers.flatMap((layer) => [
+    ...pair(0, 'LAYER'), ...pair(2, names.get(layer.id)!), ...pair(70, layer.locked ? 4 : 0),
+    ...pair(62, aci(layer.color) * (layer.visible ? 1 : -1)), ...pair(6, layer.lineType.toUpperCase()),
+  ]);
 
   const lines = [
     ...pair(0, 'SECTION'),
@@ -369,7 +423,7 @@ export function exportObjectsToDxf(
     ...pair(2, 'TABLES'),
     ...pair(0, 'TABLE'),
     ...pair(2, 'LTYPE'),
-    ...pair(70, 1),
+    ...pair(70, 3),
     ...pair(0, 'LTYPE'),
     ...pair(2, 'CONTINUOUS'),
     ...pair(70, 0),
@@ -377,15 +431,15 @@ export function exportObjectsToDxf(
     ...pair(72, 65),
     ...pair(73, 0),
     ...pair(40, 0),
+    ...['DASHED', 'DOTTED'].flatMap((name) => [
+      ...pair(0, 'LTYPE'), ...pair(2, name), ...pair(70, 0), ...pair(3, name), ...pair(72, 65),
+      ...pair(73, 2), ...pair(40, name === 'DASHED' ? 12 : 4), ...pair(49, name === 'DASHED' ? 8 : 1), ...pair(49, name === 'DASHED' ? -4 : -3),
+    ]),
     ...pair(0, 'ENDTAB'),
     ...pair(0, 'TABLE'),
     ...pair(2, 'LAYER'),
-    ...pair(70, 1),
-    ...pair(0, 'LAYER'),
-    ...pair(2, '0'),
-    ...pair(70, 0),
-    ...pair(62, 7),
-    ...pair(6, 'CONTINUOUS'),
+    ...pair(70, layers.length),
+    ...layerTable,
     ...pair(0, 'ENDTAB'),
     ...pair(0, 'TABLE'),
     ...pair(2, 'STYLE'),

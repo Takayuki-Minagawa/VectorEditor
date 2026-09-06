@@ -89,6 +89,6 @@ describe('portable backup', () => {
     const legacy = structuredClone(backup) as EditorBackup;
     const old = { ...data, version: 1, objects: JSON.stringify(data.objects) };
     const raw = JSON.stringify(legacy).replace(JSON.stringify(data), JSON.stringify(old));
-    expect(parseBackup(raw).projects[0].project.latest.version).toBe(2);
+    expect(parseBackup(raw).projects[0].project.latest.version).toBe(3);
   });
 });

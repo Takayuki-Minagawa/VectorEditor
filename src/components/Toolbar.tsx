@@ -3,7 +3,7 @@ import * as fabric from 'fabric';
 import { captureCurrentEditorSnapshot, useEditorStore } from '../store/useEditorStore';
 import { useUiStore } from '../store/useUiStore';
 import { useI18n } from '../i18n/useI18n';
-import { reassignObjectIdsRecursive } from '../utils/objectIds';
+import { importDrawingFile } from '../services/importService';
 import {
   createAsyncCanvasMutationGuard,
   deleteSelected,
@@ -19,6 +19,7 @@ import {
 } from '../utils/documentSerializer';
 import NumericMoveDialog from './NumericMoveDialog';
 import ExportDialog from './ExportDialog';
+import DxfImportDialog from './DxfImportDialog';
 import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
 import { OPEN_SECTION_OPERATIONS_EVENT } from '../utils/sectionUiEvents';
 import { openTraceDialog } from '../utils/traceUiEvents';
@@ -26,20 +27,12 @@ import SectionOperationsDialog from './SectionOperationsDialog';
 
 type Alignment = 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom';
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file.'));
-    reader.readAsDataURL(file);
-  });
-}
-
 export default function Toolbar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [showNumericMove, setShowNumericMove] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showDxfImport, setShowDxfImport] = useState(false);
   const [showSectionOperations, setShowSectionOperations] = useState(false);
   const canvas = useEditorStore((s) => s.canvas);
   const undo = useEditorStore((s) => s.undo);
@@ -90,6 +83,8 @@ export default function Toolbar() {
       guides: state.guides,
       snapToGuides: state.snapToGuides,
       orthoMode: state.orthoMode,
+      cadLayers: state.cadLayers,
+      activeCadLayerId: state.activeCadLayerId,
     });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -157,51 +152,8 @@ export default function Toolbar() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !canvas) return;
-    const isSvg = file.type === 'image/svg+xml' || file.name.endsWith('.svg');
-    const canCommit = createAsyncCanvasMutationGuard(canvas);
-
-    try {
-      if (isSvg) {
-        const loaded = await fabric.loadSVGFromString(await file.text());
-        const objects = loaded.objects.filter(Boolean) as fabric.FabricObject[];
-        if (!canCommit()) {
-          objects.forEach((object) => object.dispose());
-          return;
-        }
-        if (objects.length === 0) throw new Error('SVG has no exportable objects.');
-        const object = objects.length === 1 ? objects[0] : new fabric.Group(objects);
-        // SVG element ids are author-controlled and commonly repeat when the
-        // same asset is imported more than once. Always allocate document ids.
-        reassignObjectIdsRecursive(object);
-        canvas.add(object);
-        canvas.setActiveObject(object);
-      } else {
-        const image = await fabric.Image.fromURL(await readFileAsDataUrl(file));
-        if (!canCommit()) {
-          image.dispose();
-          return;
-        }
-        reassignObjectIdsRecursive(image);
-        const maxWidth = canvas.width || 800;
-        const maxHeight = canvas.height || 600;
-        const imageWidth = image.width || 100;
-        const imageHeight = image.height || 100;
-        const imageScale = Math.min(
-          1,
-          maxWidth * 0.8 / imageWidth,
-          maxHeight * 0.8 / imageHeight,
-        );
-        if (imageScale < 1) {
-          image.set({ scaleX: imageScale, scaleY: imageScale });
-        }
-        canvas.add(image);
-        canvas.setActiveObject(image);
-      }
-      canvas.requestRenderAll();
-      pushHistory();
-    } catch {
-      showToast(t('importError'), 'error');
-    }
+    try { await importDrawingFile(canvas, file, pushHistory); }
+    catch { showToast(t('importError'), 'error'); }
   };
 
   const handleDeleteSelected = () => {
@@ -304,6 +256,7 @@ export default function Toolbar() {
         <button className="toolbar-btn" onClick={handleSaveJSON} title={t('tip_save')}>{t('save')}</button>
         <button className="toolbar-btn" onClick={handleLoadJSON} title={t('tip_load')}>{t('load')}</button>
         <button className="toolbar-btn" onClick={handleImport} title={t('tip_import')}>{t('import')}</button>
+        {drawingMode === 'cad' && <button className="toolbar-btn" onClick={() => setShowDxfImport(true)} disabled={!canvas || isRestoring}>{t('dxfImport')}</button>}
         <button
           className="toolbar-btn"
           onClick={() => openTraceDialog()}
@@ -391,6 +344,7 @@ export default function Toolbar() {
       {showExport && (
         <ExportDialog onClose={() => setShowExport(false)} />
       )}
+      {showDxfImport && <DxfImportDialog onClose={() => setShowDxfImport(false)} />}
       {showSectionOperations && (
         <SectionOperationsDialog onClose={() => setShowSectionOperations(false)} />
       )}
