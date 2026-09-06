@@ -13,6 +13,7 @@ import { loadVisibleTools, saveVisibleTools } from '../utils/visibleToolsStorage
 export default function ToolPanel() {
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
+  const canCalibrate = useEditorStore((s) => s.drawingMode === 'cad' && s.selectedObjectIds.length > 0);
   const t = useI18n((s) => s.t);
   const [showSettings, setShowSettings] = useState(false);
   const [visibleTools, setVisibleTools] = useState<Set<ToolType>>(loadVisibleTools);
@@ -78,6 +79,7 @@ export default function ToolPanel() {
               key={td.tool}
               className={`tool-btn ${activeTool === td.tool ? 'active' : ''}`}
               onClick={() => setActiveTool(td.tool)}
+              disabled={td.tool === 'calibrate' && !canCalibrate}
               title={t(td.labelKey)}
               aria-label={t(td.labelKey)}
               aria-pressed={activeTool === td.tool}

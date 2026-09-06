@@ -46,6 +46,11 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      if (['calibrate', 'distanceMeasure', 'angleMeasure'].includes(useEditorStore.getState().activeTool)) {
+        if (e.key === 'Escape') setActiveTool('select');
+        return;
+      }
+
       // Undo: Ctrl+Z
       if (isMeta && !e.shiftKey && key === 'z') {
         e.preventDefault();

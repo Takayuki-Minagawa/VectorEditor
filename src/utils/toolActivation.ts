@@ -37,7 +37,7 @@ export function configureCanvasForTool(canvas: fabric.Canvas, tool: ToolType): v
     });
   });
 
-  if (tool !== 'select') {
+  if (tool !== 'select' && tool !== 'calibrate') {
     canvas.discardActiveObject();
     canvas.requestRenderAll();
   }

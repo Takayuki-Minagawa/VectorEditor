@@ -34,6 +34,9 @@ export const TOOL_DEFINITIONS = {
   wall: { tool: 'wall', labelKey: 'tool_wall', icon: '▬', category: 'arch', gesture: 'drag', supportsOrtho: true, objectKind: 'wall' },
   column: { tool: 'column', labelKey: 'tool_column', icon: '▪', category: 'arch', gesture: 'click', objectKind: 'column' },
   latex: { tool: 'latex', labelKey: 'tool_latex', icon: '∑', category: 'utility', gesture: 'dialog', objectKind: 'latex' },
+  calibrate: { tool: 'calibrate', labelKey: 'tool_calibrate', icon: '↔', category: 'utility', gesture: 'multiPoint' },
+  distanceMeasure: { tool: 'distanceMeasure', labelKey: 'tool_distanceMeasure', icon: '↗', category: 'utility', gesture: 'multiPoint' },
+  angleMeasure: { tool: 'angleMeasure', labelKey: 'tool_angleMeasure', icon: '∠', category: 'utility', gesture: 'multiPoint' },
   measure: { tool: 'measure', labelKey: 'tool_measure', icon: '📐', category: 'utility', gesture: 'drag' },
   stretch: { tool: 'stretch', labelKey: 'tool_stretch', icon: '⇔', category: 'utility', gesture: 'drag' },
 } as const satisfies Record<ToolType, ToolDefinition>;

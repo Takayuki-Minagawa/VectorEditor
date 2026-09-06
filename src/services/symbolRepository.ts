@@ -58,3 +58,7 @@ export function saveSymbol(record: SymbolRecord): Promise<IDBValidKey> {
 export function deleteSymbol(id: string): Promise<undefined> {
   return transact('readwrite', (store) => store.delete(id)) as Promise<undefined>;
 }
+
+export function insertSymbol(record: SymbolRecord): Promise<IDBValidKey> {
+  return transact('readwrite', (store) => store.add(record));
+}

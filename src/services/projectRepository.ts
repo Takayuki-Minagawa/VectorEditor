@@ -135,3 +135,15 @@ export async function deleteProject(id: string): Promise<void> {
     database.close();
   }
 }
+
+/** Insert a restored bundle without overwriting any existing project/version. */
+export async function insertProjectBundle(project: ProjectDocument, snapshots: ProjectSnapshot[]): Promise<void> {
+  const database = await openDatabase();
+  try {
+    const transaction = database.transaction([DOCUMENT_STORE, SNAPSHOT_STORE], 'readwrite');
+    const done = transactionDone(transaction);
+    transaction.objectStore(DOCUMENT_STORE).add(project);
+    snapshots.forEach((snapshot) => transaction.objectStore(SNAPSHOT_STORE).add(snapshot));
+    await done;
+  } finally { database.close(); }
+}

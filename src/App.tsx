@@ -14,6 +14,9 @@ import Dialog from './components/Dialog';
 import IconButton from './components/IconButton';
 import CommandPalette from './components/CommandPalette';
 import ProjectManager from './components/ProjectManager';
+import BackupManager from './components/BackupManager';
+import GeometryTools from './components/GeometryTools';
+import { recoverPendingBackups } from './services/backupService';
 import TraceDialog from './components/TraceDialog';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { clearAutoSave, loadAutoSaveAsync, useAutoSave, type AutoSaveData } from './hooks/useAutoSave';
@@ -63,7 +66,9 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    loadAutoSaveAsync()
+    recoverPendingBackups()
+      .catch(() => { useEditorStore.getState().showToast(useI18n.getState().t('backupError'), 'error'); })
+      .then(loadAutoSaveAsync)
       .then((saved) => {
         if (cancelled) return;
         // The project id is only safe to retain across startup when an
@@ -132,11 +137,13 @@ function App() {
 
   return (
     <div className="app" aria-busy={isRestoring}>
-      <div className="app-interactive" inert={isRestoring} aria-hidden={isRestoring || undefined}>
+      <div className="app-interactive" inert={isRestoring || checkingAutoSave} aria-hidden={isRestoring || undefined}>
         <div className="app-header">
         <Toolbar />
         <div className="header-right">
           <ProjectManager />
+          <BackupManager />
+          <GeometryTools />
           <IconButton
             className={`lang-btn ${leftPanelOpen ? 'active' : ''}`}
             onClick={toggleLeftPanel}

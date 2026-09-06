@@ -2344,3 +2344,15 @@ input[aria-invalid='true'] {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Local backup, export presets and geometry measurements */
+.feature-fieldset { border: 1px solid var(--border-color, #aaa); border-radius: 6px; padding: 10px; margin: 8px 0 14px; min-width: 0; }
+.feature-fieldset legend { font-size: 13px; font-weight: 600; padding: 0 5px; }
+.feature-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.feature-help { font-size: 12px; line-height: 1.6; opacity: .85; }
+.feature-check { display: flex; gap: 8px; align-items: center; padding: 5px 0; overflow-wrap: anywhere; }
+.backup-project-list { max-height: 180px; overflow: auto; }
+.backup-dialog { width: min(560px, calc(100vw - 24px)); }
+.backup-dialog input[type=file] { display: block; width: 100%; margin: 8px 0; }
+.geometry-instructions { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 80; background: var(--bg-panel, #fff); color: var(--text-primary, #222); border: 1px solid #f59e0b; border-radius: 8px; box-shadow: 0 3px 16px #0003; padding: 10px 14px; display: flex; gap: 12px; align-items: center; max-width: calc(100vw - 32px); font-size: 13px; }
+[data-theme='dark'] .geometry-instructions { background: #252526; color: #eee; }

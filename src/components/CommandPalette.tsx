@@ -25,6 +25,7 @@ import {
 import { openSectionOperations } from '../utils/sectionUiEvents';
 import { openTraceDialog } from '../utils/traceUiEvents';
 import Dialog from './Dialog';
+import { MEASURE_SHAPE_EVENT } from './GeometryTools';
 
 interface EditorAction {
   id: string;
@@ -106,6 +107,7 @@ export default function CommandPalette() {
       }
     };
     const canvasActions: EditorAction[] = [
+      { id: 'measure-shape', label: t('measureShape'), keywords: 'measure area perimeter 面積 周長', disabled: !canvas || !selectionCount, perform: () => window.dispatchEvent(new Event(MEASURE_SHAPE_EVENT)) },
       { id: 'undo', label: t('undo'), keywords: 'undo history', shortcut: '⌘/Ctrl+Z', disabled: isRestoring || historyIndex <= 0, perform: undo },
       { id: 'redo', label: t('redo'), keywords: 'redo history', shortcut: '⌘/Ctrl+Shift+Z', disabled: isRestoring || historyIndex >= historyLength - 1, perform: redo },
       { id: 'select-all', label: t('selectAll'), keywords: 'selection all', shortcut: '⌘/Ctrl+A', disabled: !canvas, perform: () => { if (canvas) selectAll(canvas); } },
@@ -201,6 +203,7 @@ export default function CommandPalette() {
         id: `tool-${tool.tool}`,
         label: `${t('activateTool')}: ${t(tool.labelKey)}`,
         keywords: `tool ${tool.tool} ${tool.category}`,
+        disabled: tool.tool === 'calibrate' && (drawingMode !== 'cad' || selectionCount === 0),
         perform: () => setActiveTool(tool.tool),
       })),
     ];

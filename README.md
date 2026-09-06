@@ -1,8 +1,16 @@
 # Vector Illustration Editor
 
-Vector Illustration Editor v1.1.0 is a browser-based editor for diagrams, illustrations, floor plans, and other vector drawings. It combines an office-style illustration workflow with a real-scale CAD mode and keeps project data in the browser unless the user explicitly exports it.
+Vector Illustration Editor v1.2.0 is a browser-based editor for diagrams, illustrations, floor plans, and other vector drawings. It combines an office-style illustration workflow with a real-scale CAD mode and keeps project data in the browser unless the user explicitly exports it.
 
 **日本語:** 資料・マニュアル・教材向けの挿絵から、実寸ベースの建築図面まで作成できるブラウザ版ベクターエディタです。UI は日本語（初期設定）と英語に対応しています。
+
+## Highlights in v1.2.0
+
+- Named export presets, kept separately for illustration and CAD, with update/delete and persistent storage validation
+- Portable JSON backups of selected saved projects, all retained versions and the symbol library; restore as separate copies with crash-recovery cleanup
+- CAD two-point size calibration for images and selected geometry, keeping the first point fixed and refreshing linked dimensions
+- Two-point distance, three-point angle, and closed-shape area/outer/hole perimeter measurements with CAD unit conversion and clipboard output
+- Local quality checks and an optional manual Pages deployment trigger to avoid duplicate CI runs
 
 ## Highlights in v1.1.0
 
@@ -68,6 +76,14 @@ These are geometric section properties only. Material strength, member resistanc
 - Built-in style swatches plus “Remember style” / “Apply style” actions for fill, stroke, text, and line settings
 - Save the current selection as a named symbol asset, then place or delete it from the browser-local asset library
 - Save named projects and version snapshots in IndexedDB; the most recent 20 snapshots per project are retained
+
+### Backup, calibration, and measurement workflows
+
+- **Export presets:** in Export, choose options, enter a preset name and save. Presets are browser-local preferences, separated by drawing mode, and exclude the file name. Recalling a selection preset with no selected objects disables export. Invalid or unavailable preset storage is reported without preventing ordinary export.
+- **Portable backup:** save working changes to a named project first, then use **Backup** in the header. Select saved projects and optionally the symbol library; the JSON contains each latest document and all retained snapshots (up to 20). Import validates the entire file and previews counts before adding separate copies. Existing projects and the working canvas are preserved. The initial format is uncompressed, limited to 100 MiB and 1,000 projects/1,000 symbols.
+- **Recovery:** a durable IndexedDB journal tracks copied IDs across the project and symbol databases. A failed restore removes partial copies; an interrupted restore is cleaned on startup or before another backup operation. Supported browsers coordinate backup operations between tabs with the Web Locks API.
+- **CAD size calibration:** select an image, traced geometry or other shapes, choose **Calibrate size**, click two reference points and enter a known length in mm/cm/m. The first point stays fixed; all selected geometry scales uniformly. Escape cancels, and one Undo reverses the committed change. Locked geometry is rejected. Calibration does not correct perspective or apply independent horizontal/vertical scales.
+- **Measurements:** **Measure distance** takes two points; **Measure angle** takes a first point, vertex and third point, reporting the unsigned 0–180° angle. **Area / perimeter** uses the selected supported closed geometry and reports net area, outer perimeter and hole perimeter separately. CAD results support mm/cm/m; illustration results use pixels. Curves report their approximation tolerance; open, self-intersecting or overlapping regions are rejected. Unite overlapping shapes first. Measurement overlays are not saved or exported.
 
 ### Files, persistence, and history
 
@@ -223,11 +239,16 @@ The trace domain stages, intermediate-data validation, Fabric conversion, Worker
 ## Documentation
 
 - [SECTION_PROPERTIES.md](./SECTION_PROPERTIES.md) — section profile specification: scope, coordinate/unit/sign conventions, geometry pipeline, property formulas, and numerical tolerances (Japanese)
+- [追加機能_作業計画.md](./追加機能_作業計画.md) — staged feature plan and implementation results (Japanese)
 - [追加機能.md](./追加機能.md) — feature implementation status and backlog (Japanese)
 
 ## Changelog
 
-### Unreleased
+### v1.2.0
+
+- Added export presets, portable project/version/symbol backups with recovery, CAD size calibration and geometry measurements
+- Added regression tests for storage failures, backup migration and recovery, transformed geometry, associated dimensions, export settings and browser workflows
+- Added manual Pages deployment support; the release can be pushed with `[skip ci]` after local checks and deployed once via `workflow_dispatch`
 
 - Added offline, browser-local image vectorization with faithful and cleanup modes, Otsu/Sauvola thresholding, contour and centreline tracing, and editable Fabric output
 - Added drop/file/clipboard/dialog and existing-raster input paths, Worker progress/cancellation, debounced SVG preview, result statistics, complexity limits, and one-step Undo insertion

@@ -16,12 +16,13 @@ import type {
   ExportScope,
 } from '../services/exportService';
 import Dialog from './Dialog';
+import { EXPORT_SCALES, loadExportPresets, saveExportPresets, type ExportPreset } from '../utils/exportPresets';
 
 interface Props {
   onClose: () => void;
 }
 
-const SCALES = ['1:1', '1:10', '1:20', '1:50', '1:100', '1:200', '1:500'];
+const SCALES = EXPORT_SCALES;
 const MULTIPLIERS = [1, 2, 3, 4];
 
 function colorInputValue(value: string): string {
@@ -56,6 +57,36 @@ export default function ExportDialog({ onClose }: Props) {
   );
   const [landscape, setLandscape] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [presetState, setPresetState] = useState(loadExportPresets);
+  const [presetId, setPresetId] = useState('');
+  const [presetName, setPresetName] = useState('');
+  const noSelection = scope === 'selection' && selectionCount === 0;
+  const applyPreset = (id: string) => {
+    setPresetId(id);
+    const p = presetState.presets.find((entry) => entry.id === id && entry.drawingMode === drawingMode);
+    if (!p) { setPresetName(''); return; }
+    setPresetName(p.name); setFormat(p.format); setScope(p.scope); setMargin(String(p.margin));
+    setTransparent(p.transparent); setBackground(p.background); setMultiplier(p.multiplier);
+    setPaperIndex(p.paperIndex); setScaleString(p.scaleString); setLandscape(p.landscape);
+  };
+  const persistPreset = (operation: 'create' | 'update' | 'delete') => {
+    try {
+      const current = loadExportPresets();
+      // Do not silently overwrite an unreadable store.
+      if (current.error) throw new Error('Preset storage unavailable');
+      const id = operation === 'create' ? crypto.randomUUID() : presetId;
+      if (operation !== 'create' && !current.presets.some((entry) => entry.id === id)) throw new Error('Preset no longer exists');
+      const preset: ExportPreset = { id, name: presetName.trim(), drawingMode, format, scope,
+        margin: Number(margin), transparent, background, multiplier, paperIndex, scaleString, landscape };
+      const next = current.presets.filter((entry) => entry.id !== id);
+      if (operation !== 'delete') next.push(preset);
+      saveExportPresets(next);
+      setPresetState({ presets: next, error: false });
+      setPresetId(operation === 'delete' ? '' : id);
+      if (operation === 'delete') setPresetName('');
+      showToast(t('presetSaved'), 'success');
+    } catch { showToast(t('presetStorageError'), 'error'); }
+  };
 
   const paper = PAPER_SIZES[paperIndex];
   const paperWidth = landscape ? Math.max(paper.width, paper.height) : Math.min(paper.width, paper.height);
@@ -141,7 +172,7 @@ export default function ExportDialog({ onClose }: Props) {
             type="button"
             className="toolbar-btn nm-btn"
             onClick={() => void run('copy')}
-            disabled={busy || !clipboardSupported}
+            disabled={busy || noSelection || !clipboardSupported}
             title={clipboardSupported ? t('copyToClipboard') : t('clipboardUnsupported')}
           >
             {t('copyToClipboard')}
@@ -150,7 +181,7 @@ export default function ExportDialog({ onClose }: Props) {
             type="button"
             className="toolbar-btn nm-btn"
             onClick={() => void run('download')}
-            disabled={busy}
+            disabled={busy || noSelection}
             data-autofocus
           >
             {busy ? t('exporting') : t('cadExportBtn')}
@@ -167,6 +198,23 @@ export default function ExportDialog({ onClose }: Props) {
       )}
     >
       <div className="modal-body export-dialog-body">
+        <fieldset className="feature-fieldset" disabled={busy}>
+          <legend>{t('exportPresets')}</legend>
+          <div className="nm-row"><label htmlFor="export-preset">{t('exportPresets')}</label>
+            <select id="export-preset" value={presetId} onChange={(event) => applyPreset(event.target.value)}>
+              <option value="">{t('presetNone')}</option>
+              {presetState.presets.filter((p) => p.drawingMode === drawingMode).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="nm-row"><label htmlFor="preset-name">{t('presetName')}</label><input id="preset-name" maxLength={80} value={presetName} onChange={(event) => setPresetName(event.target.value)} /></div>
+          <div className="feature-actions">
+            <button className="toolbar-btn" onClick={() => persistPreset('create')} disabled={!presetName.trim()}>{t('presetCreate')}</button>
+            <button className="toolbar-btn" onClick={() => persistPreset('update')} disabled={!presetId || !presetName.trim()}>{t('presetUpdate')}</button>
+            <button className="toolbar-btn" onClick={() => persistPreset('delete')} disabled={!presetId}>{t('delete')}</button>
+          </div>
+          {presetState.error && <p role="alert">{t('presetStorageError')}</p>}
+        </fieldset>
+        {noSelection && <p role="alert">{t('exportNoSelection')}</p>}
         <div className="nm-row">
           <label htmlFor="export-format">{t('exportFormat')}</label>
           <select

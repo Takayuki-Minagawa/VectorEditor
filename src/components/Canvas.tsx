@@ -621,7 +621,7 @@ export default function Canvas() {
         return;
       }
 
-      if (activeTool === 'select' || activeTool === 'nodeEdit' || activeTool === 'pencil') return;
+      if (activeTool === 'select' || activeTool === 'nodeEdit' || activeTool === 'pencil' || activeTool === 'calibrate' || activeTool === 'distanceMeasure' || activeTool === 'angleMeasure') return;
       const rawPointer = canvas.getScenePoint(opt.e);
       const resolved = resolveDrawingPoint(canvas, rawPointer);
       const pointer = resolved.point;
