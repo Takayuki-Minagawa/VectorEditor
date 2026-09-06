@@ -11,6 +11,8 @@ import {
   setFabricMetadata,
 } from '../utils/fabricObjectMetadata';
 import IconButton from './IconButton';
+import CadLayersPanel from './CadLayersPanel';
+import { isCadLayerLocked } from '../utils/cadLayers';
 
 interface LayerItem {
   id: string;
@@ -28,7 +30,7 @@ function objectFallbackLabel(object: fabric.FabricObject, t: ReturnType<typeof u
     const text = object.text || '';
     return `T: ${text.slice(0, 18)}${text.length > 18 ? '…' : ''}`;
   }
-  const toolDefinition = ALL_TOOLS.find((tool) => tool.objectKind === objectKind);
+  const toolDefinition = objectKind ? ALL_TOOLS.find((tool) => tool.objectKind === objectKind) : undefined;
   if (toolDefinition) return t(toolDefinition.labelKey);
   if (objectKind === 'sectionProfile') return t('layerSectionProfile');
   if (object instanceof fabric.Group) return `${t('layerGroup')} (${object.getObjects().length})`;
@@ -55,7 +57,7 @@ function toLayerItem(
   return {
     id,
     label: metadata.name?.trim() || objectFallbackLabel(object, t),
-    visible: object.visible !== false,
+    visible: metadata.cadVisible ?? object.visible !== false,
     locked: metadata.locked ?? Boolean(object.lockMovementX),
     object,
     rootObject,
@@ -80,6 +82,7 @@ export default function LayerPanel() {
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const setSelectedObjectIds = useEditorStore((s) => s.setSelectedObjectIds);
   const t = useI18n((s) => s.t);
+  const revision = useEditorStore((s) => s.revision);
   const [layers, setLayers] = useState<LayerItem[]>([]);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -97,15 +100,19 @@ export default function LayerPanel() {
   }, [canvas, t]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- Fabric is an external mutable store.
-  useEffect(() => { refreshLayers(); }, [selectedObjectIds, refreshLayers]);
+  useEffect(() => { refreshLayers(); }, [selectedObjectIds, revision, refreshLayers]);
 
   useEffect(() => {
     if (!canvas) return;
-    const handler = () => refreshLayers();
+    let frame: number | null = null;
+    const handler = () => {
+      if (frame === null) frame = requestAnimationFrame(() => { frame = null; refreshLayers(); });
+    };
     canvas.on('object:added', handler);
     canvas.on('object:removed', handler);
     canvas.on('object:modified', handler);
     return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
       canvas.off('object:added', handler);
       canvas.off('object:removed', handler);
       canvas.off('object:modified', handler);
@@ -120,6 +127,7 @@ export default function LayerPanel() {
   const selectObject = (item: LayerItem, multi: boolean) => {
     if (!canvas) return;
     const object = item.rootObject;
+    if (!object.visible || isCadLayerLocked(object)) return;
     const current = canvas.getActiveObjects();
     let next: fabric.FabricObject[];
     if (multi) {
@@ -142,8 +150,8 @@ export default function LayerPanel() {
   const toggleVisibility = (item: LayerItem) => {
     if (!canvas) return;
     const targets = activeOr(item.object);
-    const nextVisible = !targets.every((object) => object.visible !== false);
-    targets.forEach((object) => object.set({ visible: nextVisible }));
+    const nextVisible = !targets.every((object) => getFabricMetadata(object).cadVisible ?? object.visible !== false);
+    targets.forEach((object) => { setFabricMetadata(object, 'cadVisible', nextVisible); object.set({ visible: nextVisible }); });
     item.rootObject.dirty = true;
     if (!nextVisible) canvas.discardActiveObject();
     canvas.requestRenderAll();
@@ -327,6 +335,7 @@ export default function LayerPanel() {
 
   return (
     <div className="layer-panel">
+      <CadLayersPanel />
       <div className="prop-section-title">{t('layers')}</div>
       <label className="sr-only" htmlFor="layer-search">{t('searchLayers')}</label>
       <input

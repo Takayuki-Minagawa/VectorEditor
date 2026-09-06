@@ -1,3 +1,4 @@
+import { canvasCadLayers, filterPrintableObjects } from '../utils/cadLayers';
 import * as fabric from 'fabric';
 import { PX_PER_MM } from '../types';
 import type { DrawingMode } from '../types';
@@ -124,6 +125,7 @@ function cloneSerializedCanvas(canvas: fabric.Canvas, scope: ExportScope): Seria
     }
   }
 
+  serialized.objects = filterPrintableObjects(serialized.objects, canvasCadLayers(canvas));
   delete serialized.background;
   delete serialized.backgroundImage;
   delete serialized.overlay;
@@ -432,6 +434,7 @@ export async function createExportArtifact(
         offscreen.getObjects(),
         request.cadWidth,
         request.cadHeight,
+        canvasCadLayers(request.canvas),
       );
       const warnings: ExportWarning[] = [];
       if (dxf.unsupportedTypes.length > 0) {

@@ -16,6 +16,9 @@ type CanvasListener = (event: fabric.TPointerEventInfo) => void;
 function createCanvasHarness(activeObject: fabric.FabricObject) {
   const listeners = new Map<string, Set<CanvasListener>>();
   const canvas = {
+    getObjects: () => [activeObject],
+    forEachObject: (callback: (object: fabric.FabricObject) => void) => callback(activeObject),
+    requestRenderAll: vi.fn(),
     upperCanvasEl: document.createElement('canvas'),
     getActiveObject: vi.fn(() => activeObject),
     on: vi.fn((eventName: string, listener: CanvasListener) => {

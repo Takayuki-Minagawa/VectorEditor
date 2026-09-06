@@ -1,8 +1,18 @@
 # Vector Illustration Editor
 
-Vector Illustration Editor v1.2.0 is a browser-based editor for diagrams, illustrations, floor plans, and other vector drawings. It combines an office-style illustration workflow with a real-scale CAD mode and keeps project data in the browser unless the user explicitly exports it.
+Vector Illustration Editor v1.3.0 is a browser-based editor for diagrams, illustrations, floor plans, and other vector drawings. It combines an office-style illustration workflow with a real-scale CAD mode and keeps project data in the browser unless the user explicitly exports it.
 
 **日本語:** 資料・マニュアル・教材向けの挿絵から、実寸ベースの建築図面まで作成できるブラウザ版ベクターエディタです。UI は日本語（初期設定）と英語に対応しています。
+
+## Highlights in v1.3.0 (working branch)
+
+- Paste external raster images or SVG from the OS clipboard, with shared validation for file imports and protection for text editing and dialogs
+- CAD layers with inherited or individual styles, visibility, locks and export eligibility, independent of object stacking order
+- Schema v3 persistence with v1/v2 migration, layer-aware history, symbols and portable backups
+- Worker-based R12 ASCII DXF import with entity counts, exclusions, explicit source units and UTF-8 / Shift_JIS text decoding
+- Layer-aware DXF export and tested coordinate round-trips for LINE, straight POLYLINE, CIRCLE and simple TEXT
+
+See [対応範囲・操作説明](DXF_対応範囲.md) for format limits, layer rules and compatibility details. These changes are on `codex/interoperability-cad-layers`; Pages publication is separate from local development.
 
 ## Highlights in v1.2.0
 
@@ -87,9 +97,9 @@ These are geometric section properties only. Material strength, member resistanc
 
 ### Files, persistence, and history
 
-- Save and load editable JSON project files using document schema v2
+- Save and load editable JSON project files using document schema v3
 - Runtime validation covers schema version, dimensions, enums, guide data, JSON complexity, and Fabric object payloads
-- v1 documents with embedded Fabric JSON are migrated to the structured v2 format when loaded
+- v1 documents with embedded Fabric JSON and v2 documents migrate to schema v3 with a default CAD layer
 - Temporary interaction flags such as `selectable` and `evented` are not persisted; stable IDs, object kinds, lock state, and semantic references are persisted
 - Auto-save runs every 10 seconds, preferring IndexedDB and falling back to localStorage when required; valid legacy localStorage saves are migrated automatically
 - Startup restoration requires confirmation, and storage failures are reported with a toast
@@ -125,7 +135,7 @@ The export dialog is shared by illustration and CAD modes. It renders from an of
 | CAD page | A0–A4, portrait/landscape, and 1:1–1:500 scale |
 | Clipboard | SVG or PNG when `ClipboardItem` and the MIME type are supported by the browser |
 
-CAD PDF files are generated in millimetres with the requested physical paper size. DXF export uses millimetres and supports the editor’s R12-compatible LINE, POLYLINE, CIRCLE, and TEXT subset; unsupported or approximated object types are reported before completion. DXF/DWG import is not included in v1.1.0.
+CAD PDF files are generated in millimetres with the requested physical paper size. DXF export uses millimetres and supports the editor’s R12-compatible LINE, POLYLINE, CIRCLE, and TEXT subset; unsupported or approximated object types are reported before completion. R12 ASCII import supports the same basic 2D entities and asks for source units when unknown. DWG and BLOCK/INSERT remain unsupported. Hidden and non-printable layers are excluded from all export formats.
 
 ### UI and accessibility
 
@@ -224,7 +234,7 @@ src/
     sectionProfileTemplates.ts  Dimension-driven basic steel section profiles
     sectionBoolean.ts      Material union and cut-out operations
     sectionProperties.ts   Area, centroid, inertia, axes, distances, and moduli
-    documentSerializer.ts  Schema v2 validation, migration, restore
+    documentSerializer.ts  Schema v3 validation, migration, restore
     historyService.ts      Serialized/abortable history restoration
     semanticObjects.ts     Linked dimensions and connectors
     cadSnapping.ts         CAD snap candidates

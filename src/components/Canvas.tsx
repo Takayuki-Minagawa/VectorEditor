@@ -1,3 +1,4 @@
+import { initializeObjectLayer } from '../utils/cadLayers';
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
@@ -265,6 +266,15 @@ export default function Canvas() {
       setCanvas(null);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    return canvas.on('object:added', ({ target }) => {
+      const state = useEditorStore.getState();
+      if (!state.isRestoring) initializeObjectLayer(canvas, target, state.drawingMode === 'cad');
+    });
+  }, [storeCanvas]);
 
   // Selection events
   useEffect(() => {

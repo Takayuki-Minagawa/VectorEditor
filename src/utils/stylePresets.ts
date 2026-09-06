@@ -1,3 +1,4 @@
+import { makeLayerStyleIndividual } from './cadLayers';
 import * as fabric from 'fabric';
 
 const LEGACY_STORAGE_KEY = 'vectoreditor-current-style-v1';
@@ -143,6 +144,7 @@ export function captureEditorStyle(object: fabric.FabricObject): EditorStyle {
 }
 
 export function applyEditorStyle(object: fabric.FabricObject, style: EditorStyle): void {
+  makeLayerStyleIndividual([object]);
   if (object instanceof fabric.Group || object instanceof fabric.ActiveSelection) {
     const objectKind = (object as fabric.FabricObject & { objectKind?: string }).objectKind;
     const childStyle = ['arrow', 'dimension', 'connector'].includes(objectKind ?? '')

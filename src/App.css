@@ -2356,3 +2356,23 @@ input[aria-invalid='true'] {
 .backup-dialog input[type=file] { display: block; width: 100%; margin: 8px 0; }
 .geometry-instructions { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 80; background: var(--bg-panel, #fff); color: var(--text-primary, #222); border: 1px solid #f59e0b; border-radius: 8px; box-shadow: 0 3px 16px #0003; padding: 10px 14px; display: flex; gap: 12px; align-items: center; max-width: calc(100vw - 32px); font-size: 13px; }
 [data-theme='dark'] .geometry-instructions { background: #252526; color: #eee; }
+.cad-layers-panel { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-color, #ddd); }
+.layer-panel:has(.cad-layers-panel) { max-height: 45%; flex-shrink: 0; }
+.cad-layer-dialog { width: min(880px, calc(100vw - 32px)); }
+.dxf-import-dialog { width: min(660px, calc(100vw - 32px)); }
+.cad-layer-select { display: grid; gap: 4px; font-size: 12px; margin-bottom: 8px; }
+.cad-layer-select select { width: 100%; }
+.cad-layer-hint { font-size: 11px; line-height: 1.5; margin: 6px 0; }
+.cad-layer-buttons { display: flex; gap: 4px; flex-wrap: wrap; }
+.cad-layer-table-scroll { overflow: auto; max-height: 50vh; margin: 12px 0; }
+.cad-layer-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cad-layer-table th, .cad-layer-table td { padding: 6px 4px; text-align: center; }
+.cad-layer-table th { white-space: nowrap; }
+.cad-layer-table input:not([type='checkbox']):not([type='color']) { width: 120px; }
+.cad-layer-table input[type='number'] { max-width: 65px; }
+.cad-layer-table input[type='color'] { width: 36px; }
+.dxf-import-body { display: grid; gap: 12px; }
+.dxf-import-body p { font-size: 13px; line-height: 1.7; margin: 4px 0; }
+.dxf-import-body label { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.dxf-import-body li { font-size: 12px; margin-bottom: 5px; }
+.dxf-preview { padding: 12px; border: 1px solid #aaa; border-radius: 6px; }

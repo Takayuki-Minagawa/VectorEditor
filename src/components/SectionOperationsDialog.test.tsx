@@ -98,6 +98,8 @@ function createCanvasHarness() {
     lineWidth: 1,
   };
   const canvas = {
+    getObjects: () => [activeObject],
+    forEachObject: (callback: (object: fabric.FabricObject) => void) => callback(activeObject),
     viewportTransform: [1, 0, 0, 1, 0, 0] as fabric.TMat2D,
     getActiveObject: vi.fn(() => activeObject),
     getContext: vi.fn(() => context),
@@ -160,6 +162,7 @@ describe('SectionOperationsDialog fillet UI', () => {
       pushHistory,
       showToast,
     });
+    vi.mocked(harness.canvas.requestRenderAll).mockClear();
     return render(<SectionOperationsDialog onClose={vi.fn()} />);
   }
 

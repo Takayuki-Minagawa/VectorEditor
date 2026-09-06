@@ -52,7 +52,7 @@ export default function BackupManager() {
     } catch { setError(true); } finally { setBusy(false); }
   };
   return <>
-    <button className="toolbar-btn" onClick={() => setOpen(true)}>{t('backupTitle')}</button>
+    <button className="toolbar-btn" onClick={() => { setBusy(true); setOpen(true); }}>{t('backupTitle')}</button>
     {open && <Dialog title={t('backupTitle')} onClose={() => setOpen(false)} dismissible={!busy} closeLabel={t('close')} className="backup-dialog">
       <div className="modal-body" aria-busy={busy}>
         <p className="feature-help">{t('backupDescription')}</p>

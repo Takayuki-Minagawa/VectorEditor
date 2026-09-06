@@ -10,6 +10,7 @@ import {
 import { releaseActiveSelectionObjects } from '../utils/fabricObjectTree';
 import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
 import { createAsyncCanvasMutationGuard } from '../utils/canvasCommands';
+import { canvasCadLayers, canonicalizeSerializedLayers, mergeObjectLayers } from '../utils/cadLayers';
 import {
   deleteSymbol,
   listSymbols,
@@ -66,10 +67,12 @@ export default function SymbolLibrary() {
         // Keep an ActiveSelection as one serialized object so its group
         // transform (rotation/scale and child-local coordinates) is retained.
         objects: [active.toObject([...FABRIC_CUSTOM_PROPERTIES])],
+        cadLayers: structuredClone(canvasCadLayers(canvas)),
         thumbnail,
         createdAt: now,
         updatedAt: now,
       };
+      canonicalizeSerializedLayers(record.objects);
       await saveSymbol(record);
       setSymbols((current) => [record, ...current]);
       setName('');
@@ -92,6 +95,7 @@ export default function SymbolLibrary() {
         return;
       }
       const objects = revived.flatMap(releaseActiveSelectionObjects);
+      mergeObjectLayers(canvas, objects, record.cadLayers ?? []);
       reassignObjectIdsAndReferences(objects, { dropExternalReferences: true });
       translateSemanticAnchors(objects, PLACEMENT_OFFSET, PLACEMENT_OFFSET);
       objects.forEach((object) => {

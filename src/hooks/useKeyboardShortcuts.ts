@@ -2,12 +2,10 @@ import { useEffect } from 'react';
 import * as fabric from 'fabric';
 import { useEditorStore } from '../store/useEditorStore';
 import {
-  copyActive,
   deleteSelected,
   duplicateActive,
   groupSelection,
   moveActiveBy,
-  pasteClipboard,
   selectAll,
   ungroupActive,
 } from '../utils/canvasCommands';
@@ -17,7 +15,7 @@ export function useKeyboardShortcuts() {
     let arrowTransactionActive = false;
 
     const handler = (e: KeyboardEvent) => {
-      const { canvas, isRestoring, undo, redo, pushHistory, setActiveTool, clipboard, setClipboard, beginHistoryTransaction } =
+      const { canvas, isRestoring, undo, redo, pushHistory, setActiveTool, beginHistoryTransaction } =
         useEditorStore.getState();
       if (!canvas || isRestoring) return;
 
@@ -76,19 +74,8 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Copy: Ctrl+C
-      if (isMeta && key === 'c') {
-        e.preventDefault();
-        copyActive(canvas, setClipboard);
-        return;
-      }
-
-      // Paste: Ctrl+V
-      if (isMeta && key === 'v') {
-        e.preventDefault();
-        pasteClipboard(canvas, clipboard, setClipboard, pushHistory);
-        return;
-      }
+      // Native copy/paste events arbitrate editor selections and external images.
+      if (isMeta && (key === 'c' || key === 'v')) return;
 
       // Duplicate: Ctrl+D
       if (isMeta && key === 'd') {

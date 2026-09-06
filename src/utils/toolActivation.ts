@@ -1,3 +1,4 @@
+import { isCadLayerLocked } from './cadLayers';
 import * as fabric from 'fabric';
 import type { ToolType } from '../types';
 import { getFabricMetadata } from './fabricObjectMetadata';
@@ -31,9 +32,9 @@ export function configureCanvasForTool(canvas: fabric.Canvas, tool: ToolType): v
       || obj.lockRotation,
     );
     obj.set({
-      selectable: interactive,
-      evented: interactive,
-      hasControls: tool === 'select' && !locked,
+      selectable: interactive && !isCadLayerLocked(obj) && obj.visible,
+      evented: interactive && !isCadLayerLocked(obj) && obj.visible,
+      hasControls: tool === 'select' && !locked && !isCadLayerLocked(obj),
     });
   });
 

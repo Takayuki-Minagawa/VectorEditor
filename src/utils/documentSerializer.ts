@@ -1,3 +1,5 @@
+import { defaultCadLayers, validateCadLayers, type CadLayer } from '../domain/cadLayer';
+import { applyCadLayers, canonicalizeSerializedLayers, canvasCadLayers } from './cadLayers';
 import * as fabric from 'fabric';
 import type {
   CadUnit,
@@ -16,7 +18,7 @@ import { ensureObjectIdsRecursive } from './objectIds';
 import { validateSectionProfileData, type SectionProfileData } from '../domain/section';
 import { assertValidSectionProfileTopology } from './sectionTopology';
 
-export const DOCUMENT_VERSION = 2;
+export const DOCUMENT_VERSION = 3;
 export const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
 export const MAX_CANVAS_DIMENSION = 1_000_000;
 export const MAX_CAD_DIMENSION = 1_000_000_000;
@@ -31,6 +33,8 @@ const MAX_SECTION_POINTS = 100_000;
 type UnknownRecord = Record<string, unknown>;
 
 export interface CanvasSnapshot {
+  cadLayers?: CadLayer[];
+  activeCadLayerId?: string;
   canvas: {
     width: number;
     height: number;
@@ -58,6 +62,8 @@ export interface AutoSaveData extends CanvasSnapshot {
 }
 
 export interface CanvasStateInput {
+  cadLayers?: CadLayer[];
+  activeCadLayerId?: string;
   canvas: fabric.Canvas;
   canvasWidth: number;
   canvasHeight: number;
@@ -196,6 +202,26 @@ function validateSerializedCanvas(value: unknown): SerializedCanvasData {
   validateJsonValue(record, 'objects', 0, { nodes: 0 });
 
   const validateObjectSectionData = (object: UnknownRecord, path: string): void => {
+    if (object.cadLayerId !== undefined) assertString(object.cadLayerId, `${path}.cadLayerId`, 100);
+    if (object.cadStyleMode !== undefined && object.cadStyleMode !== 'layer' && object.cadStyleMode !== 'object') throw new Error('Invalid CAD style mode');
+    optionalBoolean(object.cadVisible, `${path}.cadVisible`);
+    if (object.cadOwnAppearance !== undefined) {
+      const own = assertRecord(object.cadOwnAppearance, 'cadOwnAppearance');
+      for (const key of ['fill', 'stroke']) {
+        const color = own[key];
+        if (color === null || (key === 'fill' && color === undefined)) continue;
+        if (typeof color === 'string' && color.length <= 256) continue;
+        const gradient = assertRecord(color, 'own gradient');
+        if (!['linear', 'radial'].includes(String(gradient.type)) || !isRecord(gradient.coords) || Object.values(gradient.coords).some((v) => typeof v !== 'number' || !Number.isFinite(v))
+          || !Array.isArray(gradient.colorStops) || gradient.colorStops.length > 10000 || gradient.colorStops.some((stop) => !isRecord(stop) || typeof stop.color !== 'string' || stop.color.length > 256 || typeof stop.offset !== 'number' || stop.offset < 0 || stop.offset > 1)) throw new Error('Invalid own gradient');
+        for (const coordinate of gradient.type === 'radial' ? ['x1', 'y1', 'r1', 'x2', 'y2', 'r2'] : ['x1', 'y1', 'x2', 'y2']) assertFiniteNumber(gradient.coords[coordinate], `gradient.${coordinate}`, -1e9, 1e9);
+        if (gradient.gradientUnits !== 'pixels' && gradient.gradientUnits !== 'percentage') throw new Error('Invalid gradient units');
+        for (const stop of gradient.colorStops as UnknownRecord[]) if (stop.opacity !== undefined) assertFiniteNumber(stop.opacity, 'gradient opacity', 0, 1);
+        if (gradient.gradientTransform !== undefined && (!Array.isArray(gradient.gradientTransform) || gradient.gradientTransform.length !== 6 || gradient.gradientTransform.some((v) => typeof v !== 'number' || !Number.isFinite(v)))) throw new Error('Invalid gradient transform');
+      }
+      assertFiniteNumber(own.strokeWidth, 'strokeWidth', 0, 1000000);
+      if (own.strokeDashArray !== null && (!Array.isArray(own.strokeDashArray) || own.strokeDashArray.length > 100 || own.strokeDashArray.some((v) => typeof v !== 'number' || !Number.isFinite(v) || v < 0))) throw new Error('Invalid own line type');
+    }
     if (object.sectionProfileData !== undefined) {
       const sectionData = object.sectionProfileData;
       if (isRecord(sectionData) && Array.isArray(sectionData.rings)) {
@@ -346,6 +372,12 @@ function migrateToCurrent(input: UnknownRecord): UnknownRecord {
     version = 2;
   }
 
+  if (version === 2) {
+    migrated = { ...migrated, cadLayers: defaultCadLayers(), activeCadLayerId: '0', version: 3 };
+    version = 3;
+  }
+  if (version === 3 && (migrated.cadLayers === undefined || migrated.activeCadLayerId === undefined)) throw new Error('CAD layer table is required');
+
   if (version !== DOCUMENT_VERSION) throw new Error('Document migration did not complete');
   return migrated;
 }
@@ -361,9 +393,21 @@ function validateSnapshot(input: UnknownRecord): CanvasSnapshot {
     throw new Error('cadWidth and cadHeight must be provided together');
   }
 
+  const cadLayers = validateCadLayers(input.cadLayers ?? defaultCadLayers());
+  const activeCadLayerId = input.activeCadLayerId === undefined ? '0' : assertString(input.activeCadLayerId, 'activeCadLayerId', 100);
+  if (!cadLayers.some((l) => l.id === activeCadLayerId)) throw new Error('Active CAD layer is missing');
+  const objects = validateSerializedCanvas(input.objects);
+  const visitLayers = (items: unknown[]) => items.forEach((item) => {
+    const object = item as UnknownRecord;
+    if (object.cadLayerId !== undefined && !cadLayers.some((l) => l.id === object.cadLayerId)) throw new Error('Unknown CAD layer reference');
+    if (Array.isArray(object.objects)) visitLayers(object.objects);
+  });
+  visitLayers(objects.objects);
   return {
+    cadLayers,
+    activeCadLayerId,
     canvas: { width, height, backgroundColor },
-    objects: validateSerializedCanvas(input.objects),
+    objects,
     drawingMode: validateDrawingMode(input.drawingMode),
     cadUnit: validateCadUnit(input.cadUnit),
     scale: validateScale(input.scale),
@@ -394,7 +438,9 @@ function parseRoot(raw: string, label: string): UnknownRecord {
 
 export function serializeCanvasObjects(canvas: fabric.Canvas): SerializedCanvasData {
   canvas.getObjects().forEach((object) => prepareObjectMetadataForSerialization(object));
-  return canvas.toObject([...FABRIC_CUSTOM_PROPERTIES]) as SerializedCanvasData;
+  const data = canvas.toObject([...FABRIC_CUSTOM_PROPERTIES]) as SerializedCanvasData;
+  canonicalizeSerializedLayers(data.objects);
+  return data;
 }
 
 export async function restoreCanvasObjects(
@@ -415,6 +461,7 @@ export async function restoreCanvasObjects(
     ensureObjectIdsRecursive(object);
     applyPersistentObjectState(object);
   });
+  applyCadLayers(canvas);
   canvas.requestRenderAll();
 }
 
@@ -434,6 +481,8 @@ export function createCanvasSnapshot(
       backgroundColor: input.backgroundColor,
     },
     objects,
+    cadLayers: structuredClone(input.cadLayers ?? canvasCadLayers(input.canvas)),
+    activeCadLayerId: input.activeCadLayerId ?? '0',
     drawingMode: input.drawingMode,
     cadUnit: input.cadUnit,
     scale: input.scale,

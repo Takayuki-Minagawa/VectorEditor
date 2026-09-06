@@ -18,6 +18,7 @@ import BackupManager from './components/BackupManager';
 import GeometryTools from './components/GeometryTools';
 import { recoverPendingBackups } from './services/backupService';
 import TraceDialog from './components/TraceDialog';
+import { useExternalClipboard } from './hooks/useExternalClipboard';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { clearAutoSave, loadAutoSaveAsync, useAutoSave, type AutoSaveData } from './hooks/useAutoSave';
 import { captureCurrentEditorSnapshot, useEditorStore } from './store/useEditorStore';
@@ -84,6 +85,7 @@ function App() {
   }, []);
 
   useKeyboardShortcuts();
+  useExternalClipboard();
   // Pause auto-save while a restore decision is pending or an async restore
   // is in flight so the existing snapshot isn't overwritten by the blank
   // startup canvas or a half-loaded restore.
