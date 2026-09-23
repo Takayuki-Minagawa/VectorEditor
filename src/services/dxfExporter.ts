@@ -70,7 +70,7 @@ function addLine(lines: string[], from: DxfPoint, to: DxfPoint): void {
   );
 }
 
-function addPolyline(lines: string[], points: DxfPoint[], closed: boolean): void {
+function addPolyline(lines: string[], points: DxfPoint[], closed: boolean, bulges?: number[]): void {
   if (points.length < 2) return;
   lines.push(
     ...pair(0, 'POLYLINE'),
@@ -81,7 +81,7 @@ function addPolyline(lines: string[], points: DxfPoint[], closed: boolean): void
     ...pair(20, 0),
     ...pair(30, 0),
   );
-  points.forEach((point) => {
+  points.forEach((point, index) => {
     lines.push(
       ...pair(0, 'VERTEX'),
       ...pair(8, '0'),
@@ -89,9 +89,48 @@ function addPolyline(lines: string[], points: DxfPoint[], closed: boolean): void
       ...pair(20, point.y),
       ...pair(30, 0),
       ...pair(70, 0),
+      ...(bulges?.[index] ? pair(42, bulges[index]) : []),
     );
   });
   lines.push(...pair(0, 'SEQEND'), ...pair(8, '0'));
+}
+
+function addArc(lines: string[], center: DxfPoint, radius: number, startAngle: number, endAngle: number): void {
+  lines.push(
+    ...pair(0, 'ARC'), ...pair(8, '0'),
+    ...pair(10, center.x), ...pair(20, center.y), ...pair(30, 0),
+    ...pair(40, radius), ...pair(50, startAngle), ...pair(51, endAngle),
+  );
+}
+
+function flattenCurvePath(path: fabric.Path, drawingHeight: number): { points: DxfPoint[]; closed: boolean } {
+  const points: DxfPoint[] = [];
+  let previous = { x: 0, y: 0 };
+  let first = previous;
+  let closed = false;
+  const append = (p: DxfPoint) => points.push(dxfPoint(scenePoint(path, {
+    x: p.x - path.pathOffset.x, y: p.y - path.pathOffset.y,
+  }), drawingHeight));
+  for (const command of path.path) {
+    const [op, ...raw] = command;
+    const v = raw.map((value) => Number(value));
+    if (op === 'M') { previous = { x: v[0]!, y: v[1]! }; first = previous; append(previous); }
+    else if (op === 'L') { previous = { x: v[0]!, y: v[1]! }; append(previous); }
+    else if (op === 'C') {
+      const start = previous; const end = { x: v[4]!, y: v[5]! };
+      for (let i = 1; i <= 16; i++) {
+        const t = i / 16, u = 1 - t;
+        append({
+          x: u ** 3 * start.x + 3 * u ** 2 * t * v[0]! + 3 * u * t ** 2 * v[2]! + t ** 3 * end.x,
+          y: u ** 3 * start.y + 3 * u ** 2 * t * v[1]! + 3 * u * t ** 2 * v[3]! + t ** 3 * end.y,
+        });
+      }
+      previous = end;
+    } else if (op === 'Z') { closed = true; previous = first; }
+    if (points.length > 100000) throw new Error('DXF path approximation exceeds vertex limit');
+  }
+  if (closed && points.length > 1 && Math.hypot(points[0].x - points.at(-1)!.x, points[0].y - points.at(-1)!.y) < 1e-7) points.pop();
+  return { points, closed };
 }
 
 function transformedEllipsePoints(
@@ -243,6 +282,43 @@ export function exportObjectsToDxf(
     }
 
     if (object instanceof fabric.Path) {
+      const curve = metadata.dxfCurveData;
+      if (curve) {
+        const sourceIntact = curve.pathSignature === JSON.stringify(object.path);
+        const delta = fabric.util.multiplyTransformMatrices(object.calcTransformMatrix(), fabric.util.invertTransform(curve.baseMatrix));
+        const sx = Math.hypot(delta[0], delta[1]);
+        const sy = Math.hypot(delta[2], delta[3]);
+        const determinant = delta[0] * delta[3] - delta[1] * delta[2];
+        const similarity = sx > 1e-9 && Math.abs(sx - sy) < 1e-7 * sx
+          && Math.abs(delta[0] * delta[2] + delta[1] * delta[3]) < 1e-7 * sx * sy;
+        if (sourceIntact && similarity) {
+          const transform = (p: DxfPoint): DxfPoint => dxfPoint({
+            x: delta[0] * p.x + delta[2] * p.y + delta[4],
+            y: delta[1] * p.x + delta[3] * p.y + delta[5],
+          }, drawingHeight);
+          if (curve.kind === 'arc' && curve.center && curve.radius && curve.startAngle !== undefined && curve.endAngle !== undefined) {
+            const center = transform(curve.center);
+            const endpoint = (angle: number) => transform({
+              x: curve.center!.x + curve.radius! * Math.cos(angle * Math.PI / 180),
+              y: curve.center!.y - curve.radius! * Math.sin(angle * Math.PI / 180),
+            });
+            const start = endpoint(curve.startAngle), end = endpoint(curve.endAngle);
+            const angle = (p: DxfPoint) => (Math.atan2(p.y - center.y, p.x - center.x) * 180 / Math.PI + 360) % 360;
+            addArc(entities, center, curve.radius * sx,
+              angle(determinant < 0 ? end : start), angle(determinant < 0 ? start : end));
+            return;
+          }
+          if (curve.kind === 'polyline' && curve.points && curve.bulges) {
+            addPolyline(entities, curve.points.map(transform), Boolean(curve.closed),
+              curve.bulges.map((bulge) => determinant < 0 ? -bulge : bulge));
+            return;
+          }
+        }
+        const flattened = flattenCurvePath(object, drawingHeight);
+        addPolyline(entities, flattened.points, flattened.closed);
+        approximated.add('DxfCurve');
+        return;
+      }
       // Closed (possibly compound) paths — e.g. Boolean operation results —
       // export as one closed POLYLINE per ring, flattened with the shared
       // section tolerance. Open paths stay unsupported.
@@ -388,7 +464,7 @@ export function exportObjectsToDxf(
     const written = entities.splice(start);
     for (let i = 0; i < written.length; i += 2) {
       entities.push(written[i], written[i] === '8' ? names.get(layer.id) ?? '0' : written[i + 1]);
-      if (written[i] === '0' && ['LINE', 'POLYLINE', 'CIRCLE', 'TEXT'].includes(written[i + 1]) && metadata.cadStyleMode !== 'layer') {
+      if (written[i] === '0' && ['LINE', 'POLYLINE', 'ARC', 'CIRCLE', 'TEXT'].includes(written[i + 1]) && metadata.cadStyleMode !== 'layer') {
         const color = object instanceof fabric.FabricText ? object.fill : object.stroke;
         const dash = object.strokeDashArray;
         entities.push(...pair(62, typeof color === 'string' ? aci(color) : 7), ...pair(6, dash?.length ? dash[0] <= 1 ? 'DOTTED' : 'DASHED' : 'CONTINUOUS'));

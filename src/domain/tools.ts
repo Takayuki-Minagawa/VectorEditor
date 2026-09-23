@@ -29,6 +29,7 @@ export const TOOL_DEFINITIONS = {
   diamond: { tool: 'diamond', labelKey: 'tool_diamond', icon: '◇', category: 'shapes', gesture: 'drag', objectKind: 'diamond' },
   polygon: { tool: 'polygon', labelKey: 'tool_polygon', icon: '⬡', category: 'shapes', gesture: 'multiPoint', objectKind: 'polygon' },
   polyline: { tool: 'polyline', labelKey: 'tool_polyline', icon: '⟋', category: 'shapes', gesture: 'multiPoint', objectKind: 'polyline' },
+  bezier: { tool: 'bezier', labelKey: 'tool_bezier', icon: '⌒', category: 'shapes', gesture: 'multiPoint', objectKind: 'bezier' },
   dimension: { tool: 'dimension', labelKey: 'tool_dimension', icon: '↔', category: 'arch', gesture: 'drag', supportsOrtho: true, objectKind: 'dimension' },
   connector: { tool: 'connector', labelKey: 'tool_connector', icon: '⌁', category: 'arch', gesture: 'drag', supportsOrtho: true, objectKind: 'connector' },
   wall: { tool: 'wall', labelKey: 'tool_wall', icon: '▬', category: 'arch', gesture: 'drag', supportsOrtho: true, objectKind: 'wall' },

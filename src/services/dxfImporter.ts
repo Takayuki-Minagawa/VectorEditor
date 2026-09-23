@@ -1,5 +1,6 @@
 import * as fabric from 'fabric';
 import { DXF_UNIT_SCALE, MAX_DXF_BYTES, type DxfDrawing, type DxfUnit } from '../domain/dxf';
+import { arcCubicSegments, arcFromAngles, arcFromBulge } from '../domain/dxfArc';
 import { layerDashArray } from '../domain/cadLayer';
 import { setFabricMetadataValues } from '../utils/fabricObjectMetadata';
 import { reassignObjectIdsAndReferences } from '../utils/objectIds';
@@ -46,7 +47,44 @@ export function dxfToFabricObjects(drawing: DxfDrawing, unit: DxfUnit, drawingHe
         object = new fabric.Line([from.x, from.y, to.x, to.y], style);
       } else if (entity.type === 'POLYLINE') {
         const points = entity.points.map(point);
-        object = entity.closed ? new fabric.Polygon(points, style) : new fabric.Polyline(points, style);
+        if (entity.bulges?.some((bulge) => bulge !== 0)) {
+          const commands = [`M ${points[0].x} ${points[0].y}`];
+          for (let j = 0; j < points.length - (entity.closed ? 0 : 1); j++) {
+            const next = (j + 1) % points.length;
+            const arc = arcFromBulge(entity.points[j], entity.points[next], entity.bulges[j] ?? 0);
+            if (!arc) commands.push(`L ${points[next].x} ${points[next].y}`);
+            else arcCubicSegments(arc).forEach(({ c1, c2, to }) => {
+              const a = point(c1); const b = point(c2); const end = point(to);
+              commands.push(`C ${a.x} ${a.y} ${b.x} ${b.y} ${end.x} ${end.y}`);
+            });
+          }
+          if (entity.closed) commands.push('Z');
+          object = new fabric.Path(commands.join(' '), style);
+          setFabricMetadataValues(object, {
+            dxfCurveData: {
+              kind: 'polyline', points: points.map(({ x, y }) => ({ x, y })),
+              bulges: entity.bulges, closed: entity.closed,
+              baseMatrix: object.calcTransformMatrix(), pathSignature: JSON.stringify((object as fabric.Path).path),
+            },
+          });
+        } else object = entity.closed ? new fabric.Polygon(points, style) : new fabric.Polyline(points, style);
+      } else if (entity.type === 'ARC') {
+        const arc = arcFromAngles(entity.center, entity.radius, entity.startAngle, entity.endAngle);
+        const segments = arcCubicSegments(arc);
+        const start = point(segments[0].from);
+        const commands = [`M ${start.x} ${start.y}`];
+        segments.forEach(({ c1, c2, to }) => {
+          const a = point(c1); const b = point(c2); const end = point(to);
+          commands.push(`C ${a.x} ${a.y} ${b.x} ${b.y} ${end.x} ${end.y}`);
+        });
+        object = new fabric.Path(commands.join(' '), style);
+        setFabricMetadataValues(object, {
+          dxfCurveData: {
+            kind: 'arc', center: { x: point(entity.center).x, y: point(entity.center).y },
+            radius: number(entity.radius), startAngle: entity.startAngle, endAngle: entity.endAngle,
+            baseMatrix: object.calcTransformMatrix(), pathSignature: JSON.stringify((object as fabric.Path).path),
+          },
+        });
       } else if (entity.type === 'CIRCLE') {
         const center = point(entity.center);
         object = new fabric.Circle({ ...style, radius: number(entity.radius), left: center.x, top: center.y, originX: 'center', originY: 'center' });

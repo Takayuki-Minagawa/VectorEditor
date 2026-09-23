@@ -81,7 +81,7 @@ describe('CAD layer presentation and persistence', () => {
     const objects = { objects: [{ type: 'Rect', width: 10, height: 20 }] };
     const legacy = { version, documentId: 'legacy', canvas: { width: 800, height: 600, backgroundColor: '#fff' }, objects: version === 1 ? JSON.stringify(objects) : objects };
     const document = parseDocumentData(JSON.stringify(legacy));
-    expect(document.version).toBe(3); expect(document.cadLayers).toEqual(defaultCadLayers());
+    expect(document.version).toBe(4); expect(document.cadLayers).toEqual(defaultCadLayers());
     document.objects.objects[0] = { ...objects.objects[0], cadLayerId: 'unknown' };
     expect(() => parseDocumentData(JSON.stringify(document))).toThrow(/Unknown CAD layer/);
     expect(() => parseDocumentData(JSON.stringify({ ...document, cadLayers: undefined }))).toThrow(/table is required/);

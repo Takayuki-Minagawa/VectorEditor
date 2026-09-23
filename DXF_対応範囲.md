@@ -27,7 +27,7 @@
 - 素材・内部クリップボードの別文書への挿入では、同じ定義を再利用し、同名で異なる定義には番号付きの別名を付ける。
 - 非表示または印刷不可の図形はSVG/PNG/PDF/DXFと画像クリップボード出力から除外する。印刷不可だけなら編集画面には残る。
 
-保存形式はschema v3。v1/v2を読み込むと画層0を補い、従来のスタイルを個別指定として維持する。JSON、自動保存、プロジェクト世代、素材、バックアップ、Undo/Redoに画層定義を含める。旧アプリにv3文書を読み込ませる用途には対応しない。
+画層の保存形式はschema v3で導入した。現行schema v4ではv1/v2を読み込むと画層0を補い、従来のスタイルを個別指定として維持する。JSON、自動保存、プロジェクト世代、素材、バックアップ、Undo/Redoに画層定義を含める。旧アプリにv4文書を読み込ませる用途には対応しない。
 
 ## DXF読み込み
 
@@ -37,7 +37,8 @@ CADモードの「DXF読込」→ファイル/文字コード選択→「内容�
 |---|---|
 | ファイル形式 | ASCII DXF R12、`$ACADVER=AC1009`。DWG・バイナリDXF・他バージョンは拒否 |
 | LINE | XYの始終点。Z=0のみ |
-| POLYLINE | 通常の2D VERTEX/SEQEND列、直線辺、開閉。bulge、幅、スプライン/曲線フィット、メッシュは除外 |
+| POLYLINE | 通常の2D VERTEX/SEQEND列、直線辺とgroup 42 bulge円弧、開閉。幅、スプライン/曲線フィット、メッシュは除外 |
+| ARC | XY中心、正の半径、開始・終了角。0°跨ぎも保持 |
 | CIRCLE | XY中心・正の半径 |
 | TEXT | 左寄せ・通常ベースライン、挿入点・高さ・回転。中央/右寄せ、反転、斜体角、幅倍率の指定は除外 |
 | 文字コード | UTF-8（ASCIIを含む）/Shift_JISを明示選択。日本語を両形式で検証。不正バイトは拒否 |
@@ -45,7 +46,7 @@ CADモードの「DXF読込」→ファイル/文字コード選択→「内容�
 | 画層 | 名前、基本ACI色1〜7、CONTINUOUS/DASHED/DOTTED、非表示・凍結・ロック |
 | 色・線種 | ACIの基本7色以外は濃いグレー、未知の線種は実線に置換し警告する |
 | 個別属性 | 明示色/線種が一つでもあればオブジェクト全体を個別指定として取り込む。BYBLOCKは除外 |
-| 未対応 | BLOCK/INSERT、3D/厚さ/傾いた押出方向、ペーパー空間、ARC/ELLIPSE/SPLINE/LWPOLYLINE/MTEXT等。未対応要素は件数と理由を表示 |
+| 未対応 | BLOCK/INSERT、3D/厚さ/傾いた押出方向、ペーパー空間、ELLIPSE/SPLINE/LWPOLYLINE/MTEXT等。未対応要素は件数と理由を表示 |
 
 入力単位はmm/cm/m/inch。`$INSUNITS`が対応単位を示す場合は初期選択するが、確認して変更できる。単位がなければ選択を必須にする。`$MEASUREMENT`のメートル系フラグからmmを推定しない。
 
@@ -55,9 +56,9 @@ CADモードの「DXF読込」→ファイル/文字コード選択→「内容�
 
 ## DXF出力と往復の限界
 
-LINE/POLYLINE/CIRCLE/TEXTの座標、寸法、回転について、mm/cm/m/inchで変換して再出力した値を小数点以下5桁の許容誤差でテストしている。閉POLYLINEは編集可能なPolygonとなり、再出力時も閉POLYLINEに戻る。
+LINE/POLYLINE/ARC/CIRCLE/TEXTの座標、寸法、回転について、mm/cm/m/inchで変換して再出力した値を小数点以下5桁の許容誤差でテストしている。直線の閉POLYLINEは編集可能なPolygonとなり、bulge付きPOLYLINEとARCは編集可能なPathになる。回転・反転・等方拡大は元の円弧として再出力する。非等方拡大やノード編集後は折れ線へ近似し、出力ダイアログに警告を表示する。
 
-画層名・所属・基本色・線種をR12へ出力する。非ASCII画層名はASCIIの一意な名前に置換し、日本語TEXTも従来どおり`?`へ置換して警告する。任意RGB色は基本色へ近似する。R12の初版範囲では線幅・印刷可否属性を保存せず、印刷不可図形そのものを除外する。したがって、編集データの完全な受け渡しにはschema v3のJSONまたはバックアップを使う。
+画層名・所属・基本色・線種をR12へ出力する。非ASCII画層名はASCIIの一意な名前に置換し、日本語TEXTも従来どおり`?`へ置換して警告する。任意RGB色は基本色へ近似する。R12の初版範囲では線幅・印刷可否属性を保存せず、印刷不可図形そのものを除外する。したがって、編集データの完全な受け渡しにはschema v4のJSONまたはバックアップを使う。
 
 ## 実装方式の検討と参照
 
@@ -68,5 +69,6 @@ LINE/POLYLINE/CIRCLE/TEXTの座標、寸法、回転について、mm/cm/m/inch�
 - [Autodesk DXF group codes](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-DXF/files/GUID-3F0380A5-1C15-464D-BC66-2C5F094BCFB9.htm)
 - [Autodesk POLYLINE](https://help.autodesk.com/cloudhelp/2016/ENU/AutoCAD-DXF/files/GUID-ABF6B778-BE20-4B49-9B58-A94E64CEFFF3.htm)
 - [Autodesk VERTEX](https://help.autodesk.com/cloudhelp/2021/ENU/AutoCAD-DXF/files/GUID-0741E831-599E-4CBF-91E1-8ADBCFD6556D.htm)
+- [Autodesk ARC](https://help.autodesk.com/cloudhelp/2018/ENU/AutoCAD-DXF/files/GUID-0B14D8F1-0EBA-44BF-9108-57D8CE614BC8.htm)
 - [Autodesk TEXT](https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-DXF/files/GUID-62E5383D-8A14-47B4-BFC4-35824CAE8363.htm)
 - [Autodesk LAYER](https://help.autodesk.com/cloudhelp/2018/ENU/AutoCAD-DXF/files/GUID-D94802B0-8BE8-4AC9-8054-17197688AFDB.htm)

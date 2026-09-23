@@ -16,6 +16,9 @@ import {
 import { updateLinkedSemanticObjects } from '../utils/semanticObjects';
 import { getFabricMetadata } from '../utils/fabricObjectMetadata';
 import SectionPropertiesPanel from './SectionPropertiesPanel';
+import { openImageCrop } from '../utils/imageCropUiEvents';
+import { currentImageCrop, imageSourceSize, resetImageCrop } from '../utils/imageCrop';
+import { refreshNodeEditControls, setBezierNodeMode } from '../utils/nodeEditing';
 
 interface ObjProps {
   left: number; top: number; width: number; height: number; angle: number;
@@ -37,6 +40,8 @@ const defaultProps: ObjProps = {
 export default function PropertyPanel() {
   const canvas = useEditorStore((s) => s.canvas);
   const selectedObjectIds = useEditorStore((s) => s.selectedObjectIds);
+  const selectedPathNode = useEditorStore((s) => s.selectedPathNode);
+  const activeTool = useEditorStore((s) => s.activeTool);
   // History revision: node edits (insert/delete) change an object's geometry
   // without firing object:modified or changing the selection, so the panel
   // re-reads whenever a history entry is pushed or undone.
@@ -251,6 +256,17 @@ export default function PropertyPanel() {
 
           <div className="prop-section">
             <div className="prop-section-title">{t('appearance')}</div>
+            {selectedObject instanceof fabric.Image && (
+              <div className="prop-row prop-row-buttons">
+                <button className="toolbar-btn" onClick={() => openImageCrop(selectedObject)}>{t('cropImage')}</button>
+                {(() => {
+                  const crop = currentImageCrop(selectedObject);
+                  const source = imageSourceSize(selectedObject);
+                  const cropped = crop.x !== 0 || crop.y !== 0 || crop.width !== source.width || crop.height !== source.height;
+                  return cropped && <button className="toolbar-btn" onClick={() => { resetImageCrop(selectedObject); pushHistory(); }}>{t('cropReset')}</button>;
+                })()}
+              </div>
+            )}
             <div className="style-preset-row" aria-label={t('stylePresets')}>
               {BUILTIN_STYLE_PRESETS.map((preset) => (
                 <button
@@ -287,6 +303,28 @@ export default function PropertyPanel() {
               <NumberField label={t('cornerRadius')} value={props.rx} onChange={(value) => { updateProp('rx', value); updateProp('ry', value); }} onBlur={commitChange} min={0} />
             )}
           </div>
+
+          {activeTool === 'nodeEdit' && selectedObject instanceof fabric.Path && selectedPathNode !== null && (
+            <div className="prop-section">
+              <div className="prop-section-title">{t('nodeMode')}</div>
+              <div className="prop-row prop-row-buttons">
+                {(['cusp', 'smooth', 'symmetric'] as const).map((mode) => (
+                  <button key={mode} className="toolbar-btn" aria-pressed={getFabricMetadata(selectedObject).bezierNodeModes?.[selectedPathNode] === mode}
+                    onClick={() => {
+                      if (!setBezierNodeMode(selectedObject, selectedPathNode, mode)) return;
+                      refreshNodeEditControls(selectedObject, (point) => {
+                        const state = useEditorStore.getState();
+                        if (!state.snapToGrid) return point;
+                        const size = state.gridSize;
+                        return { x: Math.round(point.x / size) * size, y: Math.round(point.y / size) * size };
+                      });
+                      canvas?.requestRenderAll();
+                      pushHistory();
+                    }}>{t(mode === 'cusp' ? 'nodeCusp' : mode === 'smooth' ? 'nodeSmooth' : 'nodeSymmetric')}</button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {isText && (
             <div className="prop-section">

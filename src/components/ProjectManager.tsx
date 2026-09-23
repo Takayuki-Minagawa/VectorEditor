@@ -85,6 +85,8 @@ export default function ProjectManager() {
         orthoMode: state.orthoMode,
         cadLayers: state.cadLayers,
         activeCadLayerId: state.activeCadLayerId,
+        pages: state.pages,
+        activePageId: state.activePageId,
       }),
     };
   };

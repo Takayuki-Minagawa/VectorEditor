@@ -4,6 +4,7 @@ import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
 import ToolPanel from './components/ToolPanel';
 import PropertyPanel from './components/PropertyPanel';
+import PagePanel from './components/PagePanel';
 import LayerPanel from './components/LayerPanel';
 import StatusBar from './components/StatusBar';
 import ContextMenu from './components/ContextMenu';
@@ -18,6 +19,9 @@ import BackupManager from './components/BackupManager';
 import GeometryTools from './components/GeometryTools';
 import { recoverPendingBackups } from './services/backupService';
 import TraceDialog from './components/TraceDialog';
+import ImageCropDialog from './components/ImageCropDialog';
+import { OPEN_IMAGE_CROP_EVENT } from './utils/imageCropUiEvents';
+import type * as fabric from 'fabric';
 import { useExternalClipboard } from './hooks/useExternalClipboard';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { clearAutoSave, loadAutoSaveAsync, useAutoSave, type AutoSaveData } from './hooks/useAutoSave';
@@ -56,6 +60,13 @@ function App() {
   // settles, so async restores (large/image-heavy data) aren't overwritten.
   const [restoring, setRestoring] = useState(false);
   const [traceRequest, setTraceRequest] = useState<OpenTraceDialogDetail | null>(null);
+  const [cropImage, setCropImage] = useState<fabric.Image | null>(null);
+
+  useEffect(() => {
+    const openCrop = (event: Event) => setCropImage((event as CustomEvent<fabric.Image>).detail);
+    window.addEventListener(OPEN_IMAGE_CROP_EVENT, openCrop);
+    return () => window.removeEventListener(OPEN_IMAGE_CROP_EVENT, openCrop);
+  }, []);
 
   useEffect(() => {
     const openTrace = (event: Event) => {
@@ -204,6 +215,7 @@ function App() {
         <Canvas />
         {rightPanelOpen && (
           <div className="right-panels">
+            <PagePanel />
             <PropertyPanel />
             <LayerPanel />
           </div>
@@ -220,6 +232,7 @@ function App() {
             onClose={() => setTraceRequest(null)}
           />
         )}
+        {cropImage && <ImageCropDialog image={cropImage} onClose={() => setCropImage(null)} />}
 
       {pendingRestore && (
         <Dialog title={t('restoreTitle')} onClose={discardRestore} dismissible={false} maxWidth={380}>

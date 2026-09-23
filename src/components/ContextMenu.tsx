@@ -27,6 +27,8 @@ import {
 } from '../utils/shapeBoolean';
 import { openSectionOperations } from '../utils/sectionUiEvents';
 import { openTraceDialog } from '../utils/traceUiEvents';
+import { openImageCrop } from '../utils/imageCropUiEvents';
+import { currentImageCrop, imageSourceSize, resetImageCrop } from '../utils/imageCrop';
 
 interface MenuPos {
   x: number;
@@ -109,6 +111,16 @@ export default function ContextMenu() {
   const handleSendBackward = () => exec(() => stackActive(canvas, 'sendBackward', pushHistory));
   const handleLock = () => exec(() => toggleActiveLock(canvas));
   const handleTrace = () => exec(() => openTraceDialog(traceSource));
+  const handleCrop = () => { if (traceSource) exec(() => openImageCrop(traceSource)); };
+  const handleResetCrop = () => exec(() => {
+    if (!traceSource) return;
+    resetImageCrop(traceSource);
+    pushHistory();
+  });
+  const cropSource = traceSource && canvas.getObjects().includes(traceSource) ? traceSource : undefined;
+  const crop = cropSource && currentImageCrop(cropSource);
+  const sourceSize = cropSource && imageSourceSize(cropSource);
+  const isCropped = !!crop && !!sourceSize && (crop.x !== 0 || crop.y !== 0 || crop.width !== sourceSize.width || crop.height !== sourceSize.height);
   const runSectionOperation = (operation: () => void) => exec(() => {
     try {
       operation();
@@ -143,6 +155,8 @@ export default function ContextMenu() {
           <button className="context-item" onClick={handleCopy}>{t('ctx_copy')}</button>
           <button className="context-item" onClick={handleDuplicate}>{t('ctx_duplicate')}</button>
           {traceSource && <button className="context-item" onClick={handleTrace}>{t('ctx_trace')}</button>}
+          {cropSource && <button className="context-item" onClick={handleCrop}>{t('cropImage')}</button>}
+          {isCropped && <button className="context-item" onClick={handleResetCrop}>{t('cropReset')}</button>}
           <div className="context-divider" />
           <button className="context-item" onClick={handleFlipH}>{t('ctx_flipH')}</button>
           <button className="context-item" onClick={handleFlipV}>{t('ctx_flipV')}</button>
