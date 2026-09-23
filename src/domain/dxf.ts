@@ -1,4 +1,5 @@
 import { DEFAULT_CAD_LAYER, type CadLayer } from './cadLayer';
+import { arcBoundsPoints, arcFromAngles, arcFromBulge } from './dxfArc';
 
 export const MAX_DXF_BYTES = 20 * 1024 * 1024;
 export const MAX_DXF_ENTITIES = 5000;
@@ -9,7 +10,8 @@ export interface DxfPoint { x: number; y: number }
 interface EntityStyle { layerId: string; color?: string; lineType?: CadLayer['lineType'] }
 export type DxfEntity = EntityStyle & (
   { type: 'LINE'; from: DxfPoint; to: DxfPoint } |
-  { type: 'POLYLINE'; points: DxfPoint[]; closed: boolean } |
+  { type: 'POLYLINE'; points: DxfPoint[]; closed: boolean; bulges?: number[] } |
+  { type: 'ARC'; center: DxfPoint; radius: number; startAngle: number; endAngle: number } |
   { type: 'CIRCLE'; center: DxfPoint; radius: number } |
   { type: 'TEXT'; at: DxfPoint; text: string; height: number; angle: number }
 );
@@ -125,7 +127,7 @@ export function parseDxf(source: string): DxfDrawing {
       while (input[i + 1]?.type === 'VERTEX') { children.push(input[++i]); if (++vertices > MAX_DXF_VERTICES) throw new Error('Too many DXF vertices'); }
       if (input[++i]?.type !== 'SEQEND') throw new Error('Incomplete DXF polyline');
     }
-    if (!['LINE', 'POLYLINE', 'CIRCLE', 'TEXT'].includes(entry.type)) { skip(`ENTITY:${entry.type}`); continue; }
+    if (!['LINE', 'POLYLINE', 'ARC', 'CIRCLE', 'TEXT'].includes(entry.type)) { skip(`ENTITY:${entry.type}`); continue; }
     if (nonPlanar(p) || children.some((child) => nonPlanar(child.pairs))) { skip('3D'); continue; }
     if (integer(p, 67, 0) !== 0) { skip('PAPER_SPACE'); continue; }
     const id = layerId(value(p, 8)?.trim() ?? '0');
@@ -138,12 +140,22 @@ export function parseDxf(source: string): DxfDrawing {
       const radius = numeric(p, 40); if (radius <= 0) throw new Error('Invalid circle radius');
       entities.push({ ...style, type: 'CIRCLE', center: point(p), radius });
     }
+    if (entry.type === 'ARC') {
+      const center = point(p); const radius = numeric(p, 40);
+      const startAngle = numeric(p, 50); const endAngle = numeric(p, 51);
+      arcFromAngles(center, radius, startAngle, endAngle);
+      entities.push({ ...style, type: 'ARC', center, radius, startAngle, endAngle });
+    }
     if (entry.type === 'POLYLINE') {
       const flags = integer(p, 70, 0);
       if ((flags & ~129) || children.some((child) => integer(child.pairs, 70, 0) !== 0)) { skip('POLYLINE_FLAGS'); continue; }
-      if ([p, ...children.map((child) => child.pairs)].some((pairs) => [40, 41, 42].some((c) => numeric(pairs, c, 0) !== 0))) { skip('POLYLINE_CURVE_OR_WIDTH'); continue; }
+      if ([p, ...children.map((child) => child.pairs)].some((pairs) => [40, 41].some((c) => numeric(pairs, c, 0) !== 0)) || numeric(p, 42, 0) !== 0) { skip('POLYLINE_CURVE_OR_WIDTH'); continue; }
       if (children.length < (flags & 1 ? 3 : 2)) throw new Error('Invalid polyline vertex count');
-      entities.push({ ...style, type: 'POLYLINE', closed: Boolean(flags & 1), points: children.map((child) => point(child.pairs)) });
+      const points = children.map((child) => point(child.pairs));
+      const bulges = children.map((child) => numeric(child.pairs, 42, 0));
+      const closed = Boolean(flags & 1);
+      for (let j = 0; j < points.length - (closed ? 0 : 1); j++) arcFromBulge(points[j], points[(j + 1) % points.length], bulges[j]);
+      entities.push({ ...style, type: 'POLYLINE', closed, points, ...(bulges.some((bulge) => bulge !== 0) ? { bulges } : {}) });
     }
     if (entry.type === 'TEXT') {
       if ([51, 71, 72, 73].some((c) => numeric(p, c, 0) !== 0) || numeric(p, 41, 1) !== 1) { skip('TEXT_ALIGNMENT'); continue; }
@@ -161,7 +173,15 @@ export function parseDxf(source: string): DxfDrawing {
   };
   for (const entity of entities) {
     if (entity.type === 'LINE') { include(entity.from); include(entity.to); }
-    else if (entity.type === 'POLYLINE') entity.points.forEach(include);
+    else if (entity.type === 'POLYLINE') {
+      entity.points.forEach(include);
+      entity.bulges?.forEach((bulge, index) => {
+        if (index === entity.points.length - 1 && !entity.closed) return;
+        const arc = arcFromBulge(entity.points[index], entity.points[(index + 1) % entity.points.length], bulge);
+        if (arc) arcBoundsPoints(arc).forEach(include);
+      });
+    }
+    else if (entity.type === 'ARC') arcBoundsPoints(arcFromAngles(entity.center, entity.radius, entity.startAngle, entity.endAngle)).forEach(include);
     else if (entity.type === 'CIRCLE') { include({ x: entity.center.x - entity.radius, y: entity.center.y - entity.radius }); include({ x: entity.center.x + entity.radius, y: entity.center.y + entity.radius }); }
     else { include(entity.at); }
   }

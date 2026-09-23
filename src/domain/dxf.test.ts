@@ -23,12 +23,14 @@ describe('bounded R12 importer', () => {
     expect(drawing.entities[0]).toMatchObject({ text: '部屋 A', angle: 30 });
     expect(drawing.warnings).toContain('TEXT_FONT');
   });
-  it('reads straight closed polylines and reports unsupported geometry without importing it', () => {
+  it('reads straight and curved polylines and ARC while reporting unsupported geometry', () => {
     const polyline = [0, 'POLYLINE', 70, 1, 0, 'VERTEX', 10, 0, 20, 0, 0, 'VERTEX', 10, 10, 20, 0, 0, 'VERTEX', 10, 10, 20, 10, 0, 'SEQEND'];
-    const drawing = parseDxf(dxfFixture([...polyline, ...polyline.slice(0, -2), 42, .5, 0, 'SEQEND', ...line, 30, 1, 0, 'INSERT', 2, 'block', 0, 'ARC', 10, 0, 20, 0]));
-    expect(drawing.entities).toHaveLength(1);
+    const drawing = parseDxf(dxfFixture([...polyline, ...polyline.slice(0, -2), 42, .5, 0, 'SEQEND', ...line, 30, 1, 0, 'INSERT', 2, 'block', 0, 'ARC', 10, 0, 20, 0, 40, 10, 50, 0, 51, 90]));
+    expect(drawing.entities).toHaveLength(3);
     expect(drawing.entities[0]).toMatchObject({ type: 'POLYLINE', closed: true, points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }] });
-    expect(drawing.skipped).toEqual({ POLYLINE_CURVE_OR_WIDTH: 1, '3D': 1, 'ENTITY:INSERT': 1, 'ENTITY:ARC': 1 });
+    expect(drawing.entities[1]).toMatchObject({ type: 'POLYLINE', bulges: [0, 0, .5] });
+    expect(drawing.entities[2]).toMatchObject({ type: 'ARC', center: { x: 0, y: 0 }, radius: 10 });
+    expect(drawing.skipped).toEqual({ '3D': 1, 'ENTITY:INSERT': 1 });
   });
   it.each([
     dxfFixture(line).replace('AC1009', 'AC1027'),

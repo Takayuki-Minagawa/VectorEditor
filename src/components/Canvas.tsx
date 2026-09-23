@@ -6,6 +6,7 @@ import { useI18n } from '../i18n/useI18n';
 import { mmToUnit, unitToMm, formatReal } from '../types';
 import type { ToolType } from '../types';
 import { TOOL_DEFINITIONS } from '../domain/tools';
+import { bezierPathData } from '../utils/bezierPath';
 import {
   ensureObjectId,
   generateObjectId,
@@ -123,6 +124,7 @@ export default function Canvas() {
     sessionRef,
     startDragging,
     startPolyline,
+    addBezierNode,
     startMeasuring,
     startStretching,
     startLatexPlacement,
@@ -270,6 +272,7 @@ export default function Canvas() {
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
+
     return canvas.on('object:added', ({ target }) => {
       const state = useEditorStore.getState();
       if (!state.isRestoring) initializeObjectLayer(canvas, target, state.drawingMode === 'cad');
@@ -607,6 +610,25 @@ export default function Canvas() {
     const canvas = fabricRef.current;
     if (!canvas) return;
 
+    const commitBezier = (closed: boolean) => {
+      const session = sessionRef.current;
+      if (session.kind !== 'bezier' || session.nodes.length < (closed ? 3 : 2)) return;
+      const nodes = session.nodes.filter((node, index, items) => index === 0
+        || Math.hypot(node.x - items[index - 1].x, node.y - items[index - 1].y) > 1e-6);
+      if (nodes.length < (closed ? 3 : 2)) return;
+      const path = new fabric.Path(bezierPathData(nodes, closed), {
+        fill: closed ? '#D9EAF7' : 'transparent', stroke: '#1F4E79', strokeWidth: 2,
+      });
+      applyEditorStyle(path, loadCurrentEditorStyle(closed ? 'shape' : 'line'));
+      applyDefaults(path, generateObjectId('bezier'), TOOL_DEFINITIONS.bezier.objectKind);
+      const modes = Object.fromEntries(nodes.map((node, index) => [String(index), node.mode]));
+      if (closed) modes[String(nodes.length)] = nodes[0].mode;
+      setFabricMetadataValues(path, { bezierNodeModes: modes });
+      finishSession();
+      canvas.add(path);
+      finishDrawing(path);
+    };
+
     const constrainPoint = (
       tool: ToolType,
       start: { x: number; y: number },
@@ -674,6 +696,20 @@ export default function Canvas() {
 
       if (activeTool === 'polygon' || activeTool === 'polyline') {
         startPolyline(activeTool, pointer, resolved.anchor);
+        return;
+      }
+
+      if (activeTool === 'bezier') {
+        const session = sessionRef.current;
+        if (session.kind === 'bezier' && session.nodes.length >= 3) {
+          const first = session.nodes[0];
+          if (Math.hypot(pointer.x - first.x, pointer.y - first.y) <= 10 / Math.max(canvas.getZoom(), .001)) {
+            commitBezier(true);
+            return;
+          }
+        }
+        if ((opt.e as MouseEvent).detail > 1) return;
+        addBezierNode(pointer);
         return;
       }
 
@@ -746,6 +782,23 @@ export default function Canvas() {
         return;
       }
 
+      if (session.kind === 'bezier') {
+        if (session.dragging) {
+          const node = session.nodes[session.nodes.length - 1];
+          if (Math.hypot(resolved.point.x - node.x, resolved.point.y - node.y) > 2 / Math.max(canvas.getZoom(), .001)) {
+            node.outgoing = { ...resolved.point };
+            node.incoming = { x: 2 * node.x - resolved.point.x, y: 2 * node.y - resolved.point.y };
+            node.mode = 'smooth';
+          }
+        }
+        const preview = new fabric.Path(bezierPathData(session.nodes, false, session.dragging ? undefined : resolved.point), {
+          fill: 'transparent', stroke: '#1F4E79', strokeWidth: 2,
+          strokeDashArray: [5, 4], selectable: false, evented: false, objectCaching: false,
+        });
+        setPreview(preview);
+        return;
+      }
+
       if (session.kind === 'measuring' || session.kind === 'stretching') {
         const left = Math.min(session.start.x, resolved.point.x);
         const top = Math.min(session.start.y, resolved.point.y);
@@ -798,6 +851,10 @@ export default function Canvas() {
       }
 
       const session = sessionRef.current;
+      if (session.kind === 'bezier') {
+        session.dragging = false;
+        return;
+      }
       if (session.kind === 'idle' || session.kind === 'polyline' || session.kind === 'placingLatex') return;
       let resolved = resolveDrawingPoint(canvas, canvas.getScenePoint(opt.e));
 
@@ -862,6 +919,7 @@ export default function Canvas() {
 
     const handleDblClick = () => {
       const session = sessionRef.current;
+      if (session.kind === 'bezier') { commitBezier(false); return; }
       if (session.kind !== 'polyline') return;
       const epsilon = 1 / Math.max(canvas.getZoom(), 0.001);
       const points = session.points.filter((point, index, values) => {
@@ -900,7 +958,24 @@ export default function Canvas() {
       canvas.requestRenderAll();
     };
 
+    const handleBezierKeyDown = (event: KeyboardEvent) => {
+      const session = sessionRef.current;
+      if (session.kind !== 'bezier' || event.target instanceof HTMLElement
+        && event.target.closest('input,textarea,[contenteditable="true"],[role="dialog"]')) return;
+      if (event.key === 'Enter') commitBezier(false);
+      else if (event.key === 'Backspace') {
+        session.nodes.pop();
+        if (!session.nodes.length) cancelSession();
+        else setPreview(new fabric.Path(bezierPathData(session.nodes), { fill: 'transparent', stroke: '#1F4E79', strokeWidth: 2, selectable: false, evented: false }));
+      } else if (event.key === 'Escape') cancelSession();
+      else return;
+      event.preventDefault(); event.stopPropagation();
+    };
+
+    window.addEventListener('keydown', handleBezierKeyDown, true);
+
     return disposeAll([
+      () => window.removeEventListener('keydown', handleBezierKeyDown, true),
       canvas.on('mouse:down', handleMouseDown),
       canvas.on('mouse:move', handleMouseMove),
       canvas.on('mouse:up', handleMouseUp),
@@ -922,11 +997,13 @@ export default function Canvas() {
     sessionRef,
     startDragging,
     startPolyline,
+    addBezierNode,
     startMeasuring,
     startStretching,
     startLatexPlacement,
     setPreview,
     finishSession,
+    cancelSession,
     scheduleCursorPosition,
     clearCursorPosition,
   ]);
@@ -1030,6 +1107,16 @@ export default function Canvas() {
       if (inserted) showToast(t('nodeInsertDone'), 'success');
     };
 
+    const handleNodeSelect = (opt: fabric.TPointerEventInfo) => {
+      const active = canvas.getActiveObject();
+      if (!(active instanceof fabric.Path)) {
+        useEditorStore.getState().setSelectedPathNode(null);
+        return;
+      }
+      const ref = findNodeAtScenePoint(active, canvas.getScenePoint(opt.e), 12 / Math.max(canvas.getZoom(), .001));
+      useEditorStore.getState().setSelectedPathNode(ref?.type === 'path' ? ref.commandIndex : null);
+    };
+
     // While the node-edit tool is active, body drags on the node-edited object
     // must not translate it. Lock flags cannot be used for this: the legacy
     // lock bridge would persist them as metadata.locked in the next snapshot.
@@ -1048,6 +1135,7 @@ export default function Canvas() {
       canvas.on('selection:updated', syncNodeControls),
       canvas.on('selection:cleared', syncNodeControls),
       canvas.on('mouse:dblclick', handleNodeDblClick),
+      canvas.on('mouse:down', handleNodeSelect),
       canvas.on('object:moving', blockBodyDrag),
     ]);
     return () => {

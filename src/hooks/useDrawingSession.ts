@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import * as fabric from 'fabric';
 import type { ToolType } from '../types';
 import type { SemanticAnchor } from '../utils/fabricObjectMetadata';
+import type { BezierNode } from '../utils/bezierPath';
 
 export type DrawingSession =
   | { kind: 'idle'; preview: null }
@@ -17,6 +18,12 @@ export type DrawingSession =
     tool: 'polygon' | 'polyline';
     points: { x: number; y: number }[];
     anchors: SemanticAnchor[];
+    preview: fabric.FabricObject | null;
+  }
+  | {
+    kind: 'bezier';
+    nodes: BezierNode[];
+    dragging: boolean;
     preview: fabric.FabricObject | null;
   }
   | {
@@ -93,6 +100,18 @@ export function useDrawingSession(canvas: fabric.Canvas | null) {
     if (canvasRef.current) canvasRef.current.selection = false;
   }, [replaceSession]);
 
+  const addBezierNode = useCallback((point: { x: number; y: number }) => {
+    const current = sessionRef.current;
+    if (current.kind === 'bezier') {
+      current.nodes.push({ ...point, mode: 'cusp' });
+      current.dragging = true;
+      requestRender();
+    } else {
+      replaceSession({ kind: 'bezier', nodes: [{ ...point, mode: 'cusp' }], dragging: true, preview: null });
+      if (canvasRef.current) canvasRef.current.selection = false;
+    }
+  }, [replaceSession, requestRender]);
+
   const startStretching = useCallback((start: { x: number; y: number }) => {
     replaceSession({ kind: 'stretching', start, preview: null });
     if (canvasRef.current) canvasRef.current.selection = false;
@@ -148,6 +167,7 @@ export function useDrawingSession(canvas: fabric.Canvas | null) {
     sessionRef,
     startDragging,
     startPolyline,
+    addBezierNode,
     startMeasuring,
     startStretching,
     startLatexPlacement,

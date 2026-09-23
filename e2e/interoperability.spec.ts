@@ -72,7 +72,7 @@ test('manages CAD layers, persists ByLayer styles and excludes non-printable geo
   await page.getByLabel('Drawing / assignment layer').selectOption({ label: 'Walls' });
   await page.getByRole('button', { name: 'By layer', exact: true }).click();
   await expect.poll(async () => (await state(page)).objects[0].stroke).toBe('#ff0000');
-  const document = await save(page); expect(document.version).toBe(3); expect(document.cadLayers).toHaveLength(2);
+  const document = await save(page); expect(document.version).toBe(4); expect(document.cadLayers).toHaveLength(2);
   expect(document.objects.objects[0].cadStyleMode).toBe('layer');
   await page.getByRole('button', { name: 'Manage CAD layers', exact: true }).click();
   await page.getByLabel('Print / export Walls', { exact: true }).uncheck();

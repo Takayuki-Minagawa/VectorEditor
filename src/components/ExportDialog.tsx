@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useEditorStore } from '../store/useEditorStore';
+import { captureCurrentEditorSnapshot } from '../store/useEditorStore';
 import { useI18n } from '../i18n/useI18n';
 import { PAPER_SIZES, parseScaleRatio } from '../types';
 import {
@@ -45,6 +46,8 @@ export default function ExportDialog({ onClose }: Props) {
 
   const isCad = drawingMode === 'cad';
   const [format, setFormat] = useState<ExportFormat>(isCad ? 'pdf' : 'svg');
+  const [allPages, setAllPages] = useState(false);
+  const pageCount = useEditorStore((state) => state.pages.length);
   const [scope, setScope] = useState<ExportScope>('canvas');
   const [margin, setMargin] = useState(isCad ? '10' : '0');
   const [transparent, setTransparent] = useState(false);
@@ -106,7 +109,9 @@ export default function ExportDialog({ onClose }: Props) {
       cadWidth,
       cadHeight,
       format,
-      scope,
+      scope: allPages && format === 'pdf' && !isCad ? 'canvas' : scope,
+      allPages: allPages && format === 'pdf' && !isCad,
+      pages: allPages && format === 'pdf' && !isCad ? captureCurrentEditorSnapshot()?.pages : undefined,
       margin: Number(margin),
       background: transparent ? null : background,
       multiplier,
@@ -229,11 +234,16 @@ export default function ExportDialog({ onClose }: Props) {
           </select>
         </div>
 
+        {!isCad && format === 'pdf' && pageCount > 1 && (
+          <label className="nm-row"><input type="checkbox" checked={allPages} onChange={(event) => setAllPages(event.target.checked)} />{t('exportAllPages')}</label>
+        )}
+
         <div className="nm-row">
           <label htmlFor="export-scope">{t('exportScope')}</label>
           <select
             id="export-scope"
-            value={scope}
+            value={allPages && format === 'pdf' && !isCad ? 'canvas' : scope}
+            disabled={allPages && format === 'pdf' && !isCad}
             onChange={(event) => setScope(event.target.value as ExportScope)}
           >
             <option value="canvas">{t('exportScopeCanvas')}</option>

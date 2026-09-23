@@ -85,6 +85,8 @@ export default function Toolbar() {
       orthoMode: state.orthoMode,
       cadLayers: state.cadLayers,
       activeCadLayerId: state.activeCadLayerId,
+      pages: state.pages,
+      activePageId: state.activePageId,
     });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

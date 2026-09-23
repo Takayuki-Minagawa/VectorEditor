@@ -6,12 +6,14 @@ import type {
   CadUnit,
   DrawingMode,
   Guide,
+  DocumentPage,
   SerializedCanvasData,
   ToolType,
 } from '../types';
 import { setDefaultCanvasCommandHistory } from '../utils/canvasCommands';
 import {
   createCanvasSnapshot,
+  MAX_DOCUMENT_PAGES,
   restoreCanvasObjects,
   serializeCanvasSnapshot,
   type CanvasSnapshot,
@@ -48,6 +50,14 @@ export interface EditorStore {
   setCadUnit: (unit: CadUnit) => void;
 
   // Canvas
+  pages: DocumentPage[];
+  activePageId: string;
+  switchPage: (id: string) => Promise<void>;
+  addPage: () => Promise<void>;
+  duplicatePage: () => Promise<void>;
+  deletePage: (id: string) => Promise<void>;
+  renamePage: (id: string, name: string) => void;
+  movePage: (id: string, direction: -1 | 1) => void;
   canvas: fabric.Canvas | null;
   setCanvas: (canvas: fabric.Canvas | null) => void;
   canvasWidth: number;
@@ -84,6 +94,8 @@ export interface EditorStore {
   // Selection tracking
   selectedObjectIds: string[];
   setSelectedObjectIds: (ids: string[]) => void;
+  selectedPathNode: number | null;
+  setSelectedPathNode: (index: number | null) => void;
 
   // History (Undo/Redo)
   history: CanvasSnapshot[];
@@ -158,7 +170,7 @@ type HistoryChange = 'settings' | 'objects';
 function snapshotSettingsJson(snapshot: CanvasSnapshot): string {
   // Overriding instead of manually listing settings keeps comparisons correct
   // when CanvasSnapshot gains another setting, without traversing objects.
-  return JSON.stringify({ ...snapshot, objects: undefined });
+  return JSON.stringify({ ...snapshot, objects: undefined, pages: snapshot.pages?.map((page) => ({ ...page, objects: undefined })) });
 }
 
 function snapshotsEqual(left: CanvasSnapshot, right: CanvasSnapshot): boolean {
@@ -182,6 +194,7 @@ function historySize(history: CanvasSnapshot[]): number {
   history.forEach((snapshot) => {
     totalBytes += snapshotSettingsJson(snapshot).length * 2;
     uniqueObjects.add(snapshot.objects);
+    snapshot.pages?.forEach((page) => uniqueObjects.add(page.objects));
   });
   uniqueObjects.forEach((objects) => {
     totalBytes += serializedObjectsSize(objects);
@@ -224,6 +237,8 @@ function captureSnapshot(
     orthoMode: state.orthoMode,
     cadLayers: state.cadLayers,
     activeCadLayerId: state.activeCadLayerId,
+    pages: state.pages,
+    activePageId: state.activePageId,
   };
   const snapshot = reusableObjects
     ? createCanvasSnapshot(input, reusableObjects)
@@ -272,6 +287,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       history,
       historyIndex: history.length - 1,
       revision: state.revision + 1,
+      pages: snapshot.pages ?? state.pages,
     });
   };
 
@@ -304,6 +320,9 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       cadLayers: structuredClone(snapshot.cadLayers ?? defaultCadLayers()),
       activeCadLayerId: snapshot.activeCadLayerId ?? '0',
       selectedObjectIds: [],
+      pages: snapshot.pages ?? [{ id: 'page_1', name: 'Page 1', canvas: snapshot.canvas, objects: snapshot.objects }],
+      activePageId: snapshot.activePageId ?? 'page_1',
+      selectedPathNode: null,
     });
   };
 
@@ -376,7 +395,87 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     }
   };
 
+  const performPageChange = async (
+    update: (pages: DocumentPage[], activeId: string) => { pages: DocumentPage[]; targetId: string } | null,
+  ): Promise<void> => {
+    const result = await historyService.enqueue(async (signal) => {
+      const state = get();
+      const canvas = state.canvas;
+      if (!canvas || state.drawingMode !== 'illustration') return false;
+      const before = captureSnapshot(state);
+      if (!before?.pages) return false;
+      const change = update(before.pages, state.activePageId);
+      if (!change) return false;
+      const target = change.pages.find((page) => page.id === change.targetId);
+      if (!target) return false;
+      if (change.targetId !== state.activePageId) {
+        try {
+          await restoreCanvasObjects(canvas, target.objects, signal);
+        } catch (error) {
+          if (!signal.aborted) await restoreCanvasObjects(canvas, before.objects, signal);
+          throw error;
+        }
+      }
+      if (signal.aborted) return false;
+      set({
+        pages: change.pages,
+        activePageId: target.id,
+        canvasWidth: target.canvas.width,
+        canvasHeight: target.canvas.height,
+        backgroundColor: target.canvas.backgroundColor,
+        selectedObjectIds: [],
+        selectedPathNode: null,
+      });
+      configureCanvasForTool(canvas, get().activeTool);
+      return true;
+    });
+    if (result.status === 'completed' && result.value) recordHistoryChange('objects');
+  };
+
   return {
+    pages: [{ id: 'page_1', name: 'Page 1', canvas: { width: 800, height: 600, backgroundColor: '#FFFFFF' }, objects: { objects: [] } }],
+    activePageId: 'page_1',
+    switchPage: async (id) => {
+      if (id === get().activePageId) return;
+      await performPageChange((pages) => pages.some((page) => page.id === id) ? { pages, targetId: id } : null);
+    },
+    addPage: async () => performPageChange((pages) => {
+      if (pages.length >= MAX_DOCUMENT_PAGES) return null;
+      const id = `page_${crypto.randomUUID()}`;
+      const state = get();
+      return { pages: [...pages, { id, name: `Page ${pages.length + 1}`, canvas: { width: state.canvasWidth, height: state.canvasHeight, backgroundColor: state.backgroundColor }, objects: { objects: [] } }], targetId: id };
+    }),
+    duplicatePage: async () => performPageChange((pages, activeId) => {
+      if (pages.length >= MAX_DOCUMENT_PAGES) return null;
+      const source = pages.find((page) => page.id === activeId);
+      if (!source) return null;
+      const id = `page_${crypto.randomUUID()}`;
+      const copy = structuredClone(source);
+      copy.id = id; copy.name = `${source.name} copy`;
+      const index = pages.indexOf(source);
+      return { pages: [...pages.slice(0, index + 1), copy, ...pages.slice(index + 1)], targetId: id };
+    }),
+    deletePage: async (id) => performPageChange((pages, activeId) => {
+      if (pages.length <= 1 || !pages.some((page) => page.id === id)) return null;
+      const index = pages.findIndex((page) => page.id === id);
+      const remaining = pages.filter((page) => page.id !== id);
+      return { pages: remaining, targetId: id === activeId ? remaining[Math.min(index, remaining.length - 1)].id : activeId };
+    }),
+    renamePage: (id, name) => {
+      const clean = name.trim().slice(0, 100);
+      if (!clean || !get().pages.some((page) => page.id === id)) return;
+      set({ pages: get().pages.map((page) => page.id === id ? { ...page, name: clean } : page) });
+      recordSettingChange();
+    },
+    movePage: (id, direction) => {
+      const pages = [...get().pages];
+      const index = pages.findIndex((page) => page.id === id);
+      const next = index + direction;
+      if (index < 0 || next < 0 || next >= pages.length) return;
+      [pages[index], pages[next]] = [pages[next], pages[index]];
+      set({ pages });
+      recordSettingChange();
+    },
     cadLayers: defaultCadLayers(),
     activeCadLayerId: '0',
     setCadLayers: (layers, activeId = get().activeCadLayerId, record = true) => {
@@ -388,6 +487,10 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     drawingMode: 'illustration',
     setDrawingMode: (mode) => {
       if (mode === get().drawingMode) return;
+      if (mode === 'cad' && get().pages.length > 1) {
+        get().showToast('複数ページの文書はCADモードに切り替えられません。', 'error');
+        return;
+      }
       set({ drawingMode: mode });
       recordSettingChange();
     },
@@ -496,6 +599,8 @@ export const useEditorStore = create<EditorStore>((set, get) => {
 
     selectedObjectIds: [],
     setSelectedObjectIds: (ids) => set({ selectedObjectIds: ids }),
+    selectedPathNode: null,
+    setSelectedPathNode: (index) => set({ selectedPathNode: index }),
 
     history: [],
     historyIndex: -1,

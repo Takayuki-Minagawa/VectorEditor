@@ -65,12 +65,15 @@ function legacyDocument(overrides: Record<string, unknown> = {}): string {
 }
 
 function currentDocument(objects: unknown[]): string {
+  const canvas = { width: 800, height: 600, backgroundColor: '#ffffff' };
+  const payload = { version: '7.2.0', objects };
   return JSON.stringify({
     documentId: 'doc_current',
     version: DOCUMENT_VERSION,
     cadLayers: defaultCadLayers(), activeCadLayerId: '0',
-    canvas: { width: 800, height: 600, backgroundColor: '#ffffff' },
-    objects: { version: '7.2.0', objects },
+    canvas,
+    objects: payload,
+    pages: [{ id: 'page_1', name: 'Page 1', canvas, objects: payload }], activePageId: 'page_1',
     drawingMode: 'cad',
     cadUnit: 'mm',
     scale: '1:1',
@@ -80,6 +83,14 @@ function currentDocument(objects: unknown[]): string {
 }
 
 describe('document schema', () => {
+  it('migrates a v3 illustration into one v4 page', () => {
+    const canvas = { width: 100, height: 200, backgroundColor: '#ffffff' };
+    const objects = { objects: [{ type: 'Rect', width: 10, height: 10 }] };
+    const parsed = parseDocumentData(JSON.stringify({ documentId: 'old', version: 3, cadLayers: defaultCadLayers(), activeCadLayerId: '0', canvas, objects, drawingMode: 'illustration' }));
+    expect(parsed.version).toBe(4);
+    expect(parsed.activePageId).toBe('page_1');
+    expect(parsed.pages).toMatchObject([{ id: 'page_1', canvas, objects }]);
+  });
   it('migrates v1 double-encoded Fabric JSON to the structured v2 schema', () => {
     const parsed = parseDocumentData(legacyDocument());
 

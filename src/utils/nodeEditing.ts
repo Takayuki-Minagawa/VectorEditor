@@ -154,11 +154,99 @@ function buildPathControls(
   });
   // Anchor and Bézier handle drags follow the same grid snapping as the
   // line/polyline node handles.
-  Object.values(controls).forEach((control) => {
+  Object.entries(controls).forEach(([key, control]) => {
     const handler = control.actionHandler as AnyActionHandler | undefined;
-    if (handler) control.actionHandler = withSnappedPointer(handler, snapPoint);
+    if (!handler) return;
+    const snapped = withSnappedPointer(handler, snapPoint);
+    control.actionHandler = function constrained(eventData, transform, x, y) {
+      const commandMatch = /^c_(\d+)_/.exec(key);
+      const index = commandMatch ? Number(commandMatch[1]) : -1;
+      const controlsPath = transform.target as fabric.Path;
+      const commands = controlsPath.path as unknown as SimplePathCommand[];
+      const numbers = commands as unknown as number[][];
+      const before = index >= 0 && commands[index] ? [...commands[index]] : undefined;
+      const result = snapped.call(this, eventData, transform, x, y);
+      if (!result || !before || !commands[index]) return result;
+      const isFirstHandle = key.endsWith('_CP_1');
+      const isSecondHandle = key.endsWith('_CP_2');
+      if (!isFirstHandle && !isSecondHandle) {
+        const oldX = before[before.length - 2] as number;
+        const oldY = before[before.length - 1] as number;
+        const command = numbers[index];
+        const dx = command[command.length - 2] - oldX;
+        const dy = command[command.length - 1] - oldY;
+        if (dx !== 0 || dy !== 0) {
+          const anchor = new fabric.Point(command[command.length - 2], command[command.length - 1]);
+          withAnchoredGeometry(controlsPath, anchor, () => {
+            if (commands[index][0] === 'C') { command[3] += dx; command[4] += dy; }
+            const next = numbers[index + 1];
+            if (commands[index + 1]?.[0] === 'C') { next[1] += dx; next[2] += dy; }
+          });
+        }
+        return result;
+      }
+      const anchorIndex = isFirstHandle ? index - 1 : index;
+      const mode = getFabricMetadata(controlsPath).bezierNodeModes?.[String(anchorIndex)] ?? 'cusp';
+      if (mode === 'cusp') return result;
+      const anchorCommand = numbers[anchorIndex];
+      const oppositeIndex = isFirstHandle ? anchorIndex : index + 1;
+      const opposite = numbers[oppositeIndex];
+      if (!anchorCommand || !opposite || commands[oppositeIndex][0] !== 'C') return result;
+      const anchor = { x: anchorCommand[anchorCommand.length - 2], y: anchorCommand[anchorCommand.length - 1] };
+      const moved = numbers[index];
+      const movedX = moved[isFirstHandle ? 1 : 3], movedY = moved[isFirstHandle ? 2 : 4];
+      const oppositeXIndex = isFirstHandle ? 3 : 1;
+      const oppositeYIndex = oppositeXIndex + 1;
+      const oldLength = Math.hypot(opposite[oppositeXIndex] - anchor.x, opposite[oppositeYIndex] - anchor.y);
+      const movedLength = Math.hypot(movedX - anchor.x, movedY - anchor.y);
+      if (movedLength < 1e-9) return result;
+      const length = mode === 'symmetric' ? movedLength : oldLength;
+      withAnchoredGeometry(controlsPath, new fabric.Point(anchor.x, anchor.y), () => {
+        opposite[oppositeXIndex] = anchor.x - (movedX - anchor.x) * length / movedLength;
+        opposite[oppositeYIndex] = anchor.y - (movedY - anchor.y) * length / movedLength;
+      });
+      return result;
+    };
   });
   return controls;
+}
+
+export function setBezierNodeMode(path: fabric.Path, index: number, mode: 'cusp' | 'smooth' | 'symmetric'): boolean {
+  const commands = path.path as unknown as SimplePathCommand[];
+  const numbers = commands as unknown as number[][];
+  const command = numbers[index];
+  if (!command || commands[index][0] === 'Z') return false;
+  const anchor = { x: command[command.length - 2], y: command[command.length - 1] };
+  if (mode !== 'cusp') {
+    withAnchoredGeometry(path, new fabric.Point(anchor.x, anchor.y), () => {
+      const previous = numbers[index - 1];
+      if (commands[index][0] === 'L' && previous) {
+        const start = { x: previous[previous.length - 2], y: previous[previous.length - 1] };
+        commands[index] = ['C', start.x + (anchor.x - start.x) / 3, start.y + (anchor.y - start.y) / 3,
+          anchor.x - (anchor.x - start.x) / 3, anchor.y - (anchor.y - start.y) / 3, anchor.x, anchor.y];
+      }
+      const next = numbers[index + 1];
+      if (commands[index + 1]?.[0] === 'L') {
+        const end = { x: next[1], y: next[2] };
+        commands[index + 1] = ['C', anchor.x + (end.x - anchor.x) / 3, anchor.y + (end.y - anchor.y) / 3,
+          end.x - (end.x - anchor.x) / 3, end.y - (end.y - anchor.y) / 3, end.x, end.y];
+      }
+      const incoming = numbers[index];
+      const outgoing = numbers[index + 1];
+      if (commands[index]?.[0] === 'C' && commands[index + 1]?.[0] === 'C') {
+        const dx = outgoing[1] - anchor.x, dy = outgoing[2] - anchor.y;
+        const outLength = Math.hypot(dx, dy);
+        const inLength = Math.hypot(incoming[3] - anchor.x, incoming[4] - anchor.y);
+        if (outLength > 1e-9) {
+          const length = mode === 'symmetric' ? outLength : inLength;
+          incoming[3] = anchor.x - dx * length / outLength;
+          incoming[4] = anchor.y - dy * length / outLength;
+        }
+      }
+    });
+  }
+  setFabricMetadataValues(path, { bezierNodeModes: { ...getFabricMetadata(path).bezierNodeModes, [index]: mode } });
+  return true;
 }
 
 function buildControlsFor(
@@ -411,7 +499,15 @@ export function insertPathNode(
   const anchors = listPathAnchors(commands);
   if (anchors.length === 0) return null;
   const anchorRaw = new fabric.Point(anchors[0].point.x, anchors[0].point.y);
-  return withAnchoredGeometry(path, anchorRaw, () => insertAnchorOnSegment(commands, hit));
+  const insertedIndex = withAnchoredGeometry(path, anchorRaw, () => insertAnchorOnSegment(commands, hit));
+  if (insertedIndex !== null) {
+    const modes = getFabricMetadata(path).bezierNodeModes;
+    if (modes) setFabricMetadataValues(path, { bezierNodeModes: Object.fromEntries(
+      Object.entries(modes).map(([key, mode]) => [String(Number(key) >= insertedIndex ? Number(key) + 1 : Number(key)), mode])
+        .concat([[String(insertedIndex), 'smooth']]),
+    ) as typeof modes });
+  }
+  return insertedIndex;
 }
 
 /** Removes a path anchor. Refuses below the per-subpath minimum anchor count. */
@@ -426,6 +522,13 @@ export function deletePathNode(path: fabric.Path, commandIndex: number): boolean
   withAnchoredGeometry(path, anchorRaw, () => {
     deleted = deletePathAnchor(commands, commandIndex);
   });
+  if (deleted) {
+    const modes = getFabricMetadata(path).bezierNodeModes;
+    if (modes) setFabricMetadataValues(path, { bezierNodeModes: Object.fromEntries(
+      Object.entries(modes).filter(([key]) => Number(key) !== commandIndex)
+        .map(([key, mode]) => [String(Number(key) > commandIndex ? Number(key) - 1 : Number(key)), mode]),
+    ) as typeof modes });
+  }
   return deleted;
 }
 

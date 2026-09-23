@@ -1,7 +1,7 @@
 import { canvasCadLayers, filterPrintableObjects } from '../utils/cadLayers';
 import * as fabric from 'fabric';
 import { PX_PER_MM } from '../types';
-import type { DrawingMode } from '../types';
+import type { DocumentPage, DrawingMode } from '../types';
 import { FABRIC_CUSTOM_PROPERTIES } from '../utils/fabricObjectMetadata';
 import { exportObjectsToDxf } from './dxfExporter';
 
@@ -15,6 +15,8 @@ export interface CadPageExportOptions {
 }
 
 export interface DrawingExportRequest {
+  pages?: DocumentPage[];
+  allPages?: boolean;
   canvas: fabric.Canvas;
   drawingMode: DrawingMode;
   documentWidth: number;
@@ -394,6 +396,38 @@ async function createPdfBlob(
   return new Blob([pdf.output('arraybuffer')], { type: MIME_BY_FORMAT.pdf });
 }
 
+async function createMultiPagePdf(pages: DocumentPage[], source: fabric.Canvas): Promise<Blob> {
+  if (!pages.length || pages.length > 50) throw new DrawingExportError('INVALID_OPTIONS', 'Invalid PDF page count.');
+  for (const page of pages) {
+    const { width, height } = page.canvas;
+    if (width < 1 || height < 1 || width > 14_000 || height > 14_000 || width * height > 100_000_000) {
+      throw new DrawingExportError('OUTPUT_TOO_LARGE', 'A PDF page is too large.');
+    }
+  }
+  const [{ jsPDF }] = await Promise.all([import('jspdf'), import('svg2pdf.js')]);
+  const first = pages[0].canvas;
+  const pdf = new jsPDF({ orientation: first.width >= first.height ? 'landscape' : 'portrait', unit: 'px', format: [first.width, first.height], hotfixes: ['px_scaling'] });
+  for (let index = 0; index < pages.length; index++) {
+    const page = pages[index];
+    if (index > 0) pdf.addPage([page.canvas.width, page.canvas.height], page.canvas.width >= page.canvas.height ? 'landscape' : 'portrait');
+    const offscreen = new fabric.StaticCanvas(undefined, { width: 1, height: 1, enableRetinaScaling: false, renderOnAddRemove: false });
+    try {
+      const filtered = { ...page.objects, objects: filterPrintableObjects(page.objects.objects, canvasCadLayers(source)) };
+      await offscreen.loadFromJSON(filtered);
+      offscreen.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      const width = page.canvas.width, height = page.canvas.height;
+      const svg = createSvg(offscreen, {
+        scene: { left: 0, top: 0, width, height }, logicalWidth: width, logicalHeight: height,
+        artifactWidth: width, artifactHeight: height, unit: 'px', sceneScale: 1, clipped: false,
+      }, page.canvas.backgroundColor, 'illustration');
+      await pdf.svg(parseSvgElement(svg), { x: 0, y: 0, width, height });
+    } finally {
+      await offscreen.dispose();
+    }
+  }
+  return new Blob([pdf.output('arraybuffer')], { type: MIME_BY_FORMAT.pdf });
+}
+
 export function normalizeExportFileName(fileName: string, format: ExportFormat): string {
   const withoutKnownExtension = fileName.trim().replace(/\.(svg|png|pdf|dxf)$/i, '');
   const sanitized = Array.from(withoutKnownExtension)
@@ -417,6 +451,13 @@ export async function createExportArtifact(
   assertPositiveFinite(request.cadHeight, 'CAD height');
   if (request.format === 'dxf' && request.drawingMode !== 'cad') {
     throw new DrawingExportError('INVALID_OPTIONS', 'DXF export is only available in CAD mode.');
+  }
+  if (request.allPages) {
+    if (request.format !== 'pdf' || request.drawingMode !== 'illustration' || request.scope !== 'canvas' || !request.pages) {
+      throw new DrawingExportError('INVALID_OPTIONS', 'All-page export requires an illustration PDF.');
+    }
+    const blob = await createMultiPagePdf(request.pages, request.canvas);
+    return { blob, fileName: normalizeExportFileName(request.fileName, 'pdf'), format: 'pdf', width: request.pages[0].canvas.width, height: request.pages[0].canvas.height, unit: 'px', warnings: [] };
   }
 
   const offscreen = await createOffscreenCanvas(request.canvas, request.scope);

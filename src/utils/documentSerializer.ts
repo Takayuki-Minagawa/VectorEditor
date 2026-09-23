@@ -5,6 +5,7 @@ import type {
   CadUnit,
   DocumentData,
   DrawingMode,
+  DocumentPage,
   Guide,
   SerializedCanvasData,
 } from '../types';
@@ -18,7 +19,8 @@ import { ensureObjectIdsRecursive } from './objectIds';
 import { validateSectionProfileData, type SectionProfileData } from '../domain/section';
 import { assertValidSectionProfileTopology } from './sectionTopology';
 
-export const DOCUMENT_VERSION = 3;
+export const DOCUMENT_VERSION = 4;
+export const MAX_DOCUMENT_PAGES = 50;
 export const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
 export const MAX_CANVAS_DIMENSION = 1_000_000;
 export const MAX_CAD_DIMENSION = 1_000_000_000;
@@ -33,6 +35,8 @@ const MAX_SECTION_POINTS = 100_000;
 type UnknownRecord = Record<string, unknown>;
 
 export interface CanvasSnapshot {
+  pages?: DocumentPage[];
+  activePageId?: string;
   cadLayers?: CadLayer[];
   activeCadLayerId?: string;
   canvas: {
@@ -62,6 +66,8 @@ export interface AutoSaveData extends CanvasSnapshot {
 }
 
 export interface CanvasStateInput {
+  pages?: DocumentPage[];
+  activePageId?: string;
   cadLayers?: CadLayer[];
   activeCadLayerId?: string;
   canvas: fabric.Canvas;
@@ -202,6 +208,38 @@ function validateSerializedCanvas(value: unknown): SerializedCanvasData {
   validateJsonValue(record, 'objects', 0, { nodes: 0 });
 
   const validateObjectSectionData = (object: UnknownRecord, path: string): void => {
+    if (object.bezierNodeModes !== undefined) {
+      const modes = assertRecord(object.bezierNodeModes, `${path}.bezierNodeModes`);
+      if (Object.keys(modes).length > 100_000) throw new Error('Too many Bézier node modes');
+      for (const [key, mode] of Object.entries(modes)) {
+        if (!/^(0|[1-9]\d*)$/.test(key) || Number(key) > 100_000 || !['cusp', 'smooth', 'symmetric'].includes(String(mode))) throw new Error('Invalid Bézier node mode');
+      }
+    }
+    if (object.dxfCurveData !== undefined) {
+      const curve = assertRecord(object.dxfCurveData, `${path}.dxfCurveData`);
+      if (curve.kind !== 'arc' && curve.kind !== 'polyline') throw new Error('Invalid DXF curve kind');
+      if (!Array.isArray(curve.baseMatrix) || curve.baseMatrix.length !== 6) throw new Error('Invalid DXF curve transform');
+      curve.baseMatrix.forEach((value, index) => assertFiniteNumber(value, `dxfCurveData.baseMatrix[${index}]`, -1e9, 1e9));
+      assertString(curve.pathSignature, 'dxfCurveData.pathSignature', 8_000_000);
+      if (curve.kind === 'arc') {
+        const center = assertRecord(curve.center, 'dxfCurveData.center');
+        assertFiniteNumber(center.x, 'dxfCurveData.center.x', -1e9, 1e9);
+        assertFiniteNumber(center.y, 'dxfCurveData.center.y', -1e9, 1e9);
+        assertFiniteNumber(curve.radius, 'dxfCurveData.radius', 1e-10, 1e9);
+        assertFiniteNumber(curve.startAngle, 'dxfCurveData.startAngle', -1e9, 1e9);
+        assertFiniteNumber(curve.endAngle, 'dxfCurveData.endAngle', -1e9, 1e9);
+      } else {
+        if (!Array.isArray(curve.points) || !Array.isArray(curve.bulges)
+          || curve.points.length < 2 || curve.points.length > 100_000 || curve.bulges.length !== curve.points.length
+          || typeof curve.closed !== 'boolean') throw new Error('Invalid DXF polyline');
+        curve.points.forEach((item, index) => {
+          const point = assertRecord(item, `dxfCurveData.points[${index}]`);
+          assertFiniteNumber(point.x, 'DXF point x', -1e9, 1e9);
+          assertFiniteNumber(point.y, 'DXF point y', -1e9, 1e9);
+          assertFiniteNumber((curve.bulges as unknown[])[index], 'DXF bulge', -1e9, 1e9);
+        });
+      }
+    }
     if (object.cadLayerId !== undefined) assertString(object.cadLayerId, `${path}.cadLayerId`, 100);
     if (object.cadStyleMode !== undefined && object.cadStyleMode !== 'layer' && object.cadStyleMode !== 'object') throw new Error('Invalid CAD style mode');
     optionalBoolean(object.cadVisible, `${path}.cadVisible`);
@@ -378,6 +416,18 @@ function migrateToCurrent(input: UnknownRecord): UnknownRecord {
   }
   if (version === 3 && (migrated.cadLayers === undefined || migrated.activeCadLayerId === undefined)) throw new Error('CAD layer table is required');
 
+  if (version === 3) {
+    migrated = {
+      ...migrated,
+      pages: [{ id: 'page_1', name: 'Page 1', canvas: migrated.canvas, objects: migrated.objects }],
+      activePageId: 'page_1',
+      version: 4,
+    };
+    version = 4;
+  }
+  if (version === 4 && (migrated.cadLayers === undefined || migrated.activeCadLayerId === undefined)) throw new Error('CAD layer table is required');
+  if (version === 4 && (migrated.pages === undefined || migrated.activePageId === undefined)) throw new Error('Page table is required');
+
   if (version !== DOCUMENT_VERSION) throw new Error('Document migration did not complete');
   return migrated;
 }
@@ -397,13 +447,46 @@ function validateSnapshot(input: UnknownRecord): CanvasSnapshot {
   const activeCadLayerId = input.activeCadLayerId === undefined ? '0' : assertString(input.activeCadLayerId, 'activeCadLayerId', 100);
   if (!cadLayers.some((l) => l.id === activeCadLayerId)) throw new Error('Active CAD layer is missing');
   const objects = validateSerializedCanvas(input.objects);
+  let pages: DocumentPage[] | undefined;
+  let activePageId: string | undefined;
+  if (input.pages !== undefined) {
+    if (!Array.isArray(input.pages) || input.pages.length < 1 || input.pages.length > MAX_DOCUMENT_PAGES) throw new Error('Invalid page count');
+    const ids = new Set<string>();
+    pages = input.pages.map((candidate, index) => {
+      const page = assertRecord(candidate, `pages[${index}]`);
+      const id = assertString(page.id, `pages[${index}].id`, 100);
+      const name = assertString(page.name, `pages[${index}].name`, 100);
+      if (ids.has(id)) throw new Error('Duplicate page id');
+      ids.add(id);
+      const pageCanvas = assertRecord(page.canvas, `pages[${index}].canvas`);
+      return {
+        id, name,
+        canvas: {
+          width: assertFiniteNumber(pageCanvas.width, 'page width', 1, MAX_CANVAS_DIMENSION),
+          height: assertFiniteNumber(pageCanvas.height, 'page height', 1, MAX_CANVAS_DIMENSION),
+          backgroundColor: assertString(pageCanvas.backgroundColor, 'page background', 256),
+        },
+        objects: validateSerializedCanvas(page.objects),
+      };
+    });
+    activePageId = assertString(input.activePageId, 'activePageId', 100);
+    const active = pages.find((page) => page.id === activePageId);
+    if (!active) throw new Error('Active page is missing');
+    if (input.drawingMode === 'cad' && pages.length > 1) throw new Error('CAD documents support one page');
+    if (pages.reduce((count, page) => count + page.objects.objects.length, 0) > MAX_FABRIC_OBJECTS) throw new Error('Document contains too many objects');
+    if (active.canvas.width !== width || active.canvas.height !== height || active.canvas.backgroundColor !== backgroundColor
+      || JSON.stringify(active.objects) !== JSON.stringify(objects)) throw new Error('Active page does not match document canvas');
+  }
   const visitLayers = (items: unknown[]) => items.forEach((item) => {
     const object = item as UnknownRecord;
     if (object.cadLayerId !== undefined && !cadLayers.some((l) => l.id === object.cadLayerId)) throw new Error('Unknown CAD layer reference');
     if (Array.isArray(object.objects)) visitLayers(object.objects);
   });
   visitLayers(objects.objects);
+  pages?.forEach((page) => visitLayers(page.objects.objects));
   return {
+    pages,
+    activePageId,
     cadLayers,
     activeCadLayerId,
     canvas: { width, height, backgroundColor },
@@ -474,7 +557,19 @@ export function createCanvasSnapshot(
   input: CanvasStateInput,
   objects: SerializedCanvasData,
 ): CanvasSnapshot {
+  const activePageId = input.activePageId ?? 'page_1';
+  const activePage: DocumentPage = {
+    id: activePageId,
+    name: input.pages?.find((page) => page.id === activePageId)?.name ?? 'Page 1',
+    canvas: { width: input.canvasWidth, height: input.canvasHeight, backgroundColor: input.backgroundColor },
+    objects,
+  };
+  const pages = input.pages?.length
+    ? input.pages.map((page) => page.id === activePageId ? activePage : page)
+    : [activePage];
   return {
+    pages,
+    activePageId,
     canvas: {
       width: input.canvasWidth,
       height: input.canvasHeight,

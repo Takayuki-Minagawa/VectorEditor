@@ -4,7 +4,15 @@ Vector Illustration Editor v1.3.0 is a browser-based editor for diagrams, illust
 
 **日本語:** 資料・マニュアル・教材向けの挿絵から、実寸ベースの建築図面まで作成できるブラウザ版ベクターエディタです。UI は日本語（初期設定）と英語に対応しています。
 
-## Highlights in v1.3.0 (working branch)
+## Additional editing features
+
+- Crop raster images with a reversible source-pixel rectangle; the original image remains available and vectorization uses the visible crop.
+- Draw mixed straight and curved Bézier paths, then switch node constraints between cusp, smooth and symmetric.
+- Import and export R12 `ARC` and 2D `POLYLINE` bulge segments. Nonuniform transforms are exported as warned polyline approximations.
+- Manage up to 50 illustration pages with independent sizes, backgrounds and objects. Export the complete document as a multi-page PDF.
+- JSON, projects, backups, auto-save and Undo/Redo retain pages in schema v4. Older v1–v3 documents open as one page.
+
+## Highlights in v1.3.0
 
 - Paste external raster images or SVG from the OS clipboard, with shared validation for file imports and protection for text editing and dialogs
 - CAD layers with inherited or individual styles, visibility, locks and export eligibility, independent of object stacking order
@@ -12,7 +20,7 @@ Vector Illustration Editor v1.3.0 is a browser-based editor for diagrams, illust
 - Worker-based R12 ASCII DXF import with entity counts, exclusions, explicit source units and UTF-8 / Shift_JIS text decoding
 - Layer-aware DXF export and tested coordinate round-trips for LINE, straight POLYLINE, CIRCLE and simple TEXT
 
-See [対応範囲・操作説明](DXF_対応範囲.md) for format limits, layer rules and compatibility details. These changes are on `codex/interoperability-cad-layers`; Pages publication is separate from local development.
+See [対応範囲・操作説明](DXF_対応範囲.md) for format limits, layer rules and compatibility details.
 
 ## Highlights in v1.2.0
 
@@ -41,7 +49,7 @@ See [対応範囲・操作説明](DXF_対応範囲.md) for format limits, layer 
 
 ### Drawing and editing
 
-- Line, arrow, text, freehand pencil, rectangle, rounded rectangle, circle, ellipse, triangle, diamond, polygon, and polyline tools
+- Line, arrow, text, freehand pencil, rectangle, rounded rectangle, circle, ellipse, triangle, diamond, polygon, polyline, and Bézier pen tools
 - Select, move, resize, rotate, delete, duplicate, copy/paste, flip, group/ungroup, z-order, alignment, and distribution operations
 - Architecture tools for walls, columns, dimensions, and connectors
 - LaTeX expressions rendered with KaTeX; the source and font size remain in document metadata
@@ -97,9 +105,9 @@ These are geometric section properties only. Material strength, member resistanc
 
 ### Files, persistence, and history
 
-- Save and load editable JSON project files using document schema v3
+- Save and load editable JSON project files using document schema v4
 - Runtime validation covers schema version, dimensions, enums, guide data, JSON complexity, and Fabric object payloads
-- v1 documents with embedded Fabric JSON and v2 documents migrate to schema v3 with a default CAD layer
+- v1–v3 documents migrate to schema v4 with a default CAD layer and one illustration page
 - Temporary interaction flags such as `selectable` and `evented` are not persisted; stable IDs, object kinds, lock state, and semantic references are persisted
 - Auto-save runs every 10 seconds, preferring IndexedDB and falling back to localStorage when required; valid legacy localStorage saves are migrated automatically
 - Startup restoration requires confirmation, and storage failures are reported with a toast
@@ -128,14 +136,14 @@ The export dialog is shared by illustration and CAD modes. It renders from an of
 
 | Option | Supported values |
 |---|---|
-| Format | SVG, PNG, PDF; CAD mode also supports DXF R12 |
+| Format | SVG, PNG, PDF; CAD mode also supports DXF R12. Illustration mode can export all pages to PDF |
 | Scope | Entire canvas/drawing, visible content bounds, or current selection |
 | Layout | Margin, document background or transparency, file name |
 | Raster | Explicit 1×–4× multiplier, with output-size safety limits |
 | CAD page | A0–A4, portrait/landscape, and 1:1–1:500 scale |
 | Clipboard | SVG or PNG when `ClipboardItem` and the MIME type are supported by the browser |
 
-CAD PDF files are generated in millimetres with the requested physical paper size. DXF export uses millimetres and supports the editor’s R12-compatible LINE, POLYLINE, CIRCLE, and TEXT subset; unsupported or approximated object types are reported before completion. R12 ASCII import supports the same basic 2D entities and asks for source units when unknown. DWG and BLOCK/INSERT remain unsupported. Hidden and non-printable layers are excluded from all export formats.
+CAD PDF files are generated in millimetres with the requested physical paper size. DXF export uses millimetres and supports the editor’s R12-compatible LINE, POLYLINE (including bulges), ARC, CIRCLE, and TEXT subset; unsupported or approximated object types are reported before completion. R12 ASCII import supports the same basic 2D entities and asks for source units when unknown. DWG and BLOCK/INSERT remain unsupported. Hidden and non-printable layers are excluded from all export formats.
 
 ### UI and accessibility
 
@@ -249,10 +257,15 @@ The trace domain stages, intermediate-data validation, Fabric conversion, Worker
 ## Documentation
 
 - [SECTION_PROPERTIES.md](./SECTION_PROPERTIES.md) — section profile specification: scope, coordinate/unit/sign conventions, geometry pipeline, property formulas, and numerical tolerances (Japanese)
-- [追加機能_作業計画.md](./追加機能_作業計画.md) — staged feature plan and implementation results (Japanese)
 - [追加機能.md](./追加機能.md) — feature implementation status and backlog (Japanese)
 
 ## Changelog
+
+### Unreleased
+
+- Added non-destructive image cropping with Undo/Redo and persistent source pixels.
+- Added R12 ARC and POLYLINE bulge import/export, Bézier pen and node constraints.
+- Added illustration pages, schema v4 migration and multi-page PDF export.
 
 ### v1.2.0
 

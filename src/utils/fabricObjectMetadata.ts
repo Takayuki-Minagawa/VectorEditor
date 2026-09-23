@@ -54,6 +54,19 @@ export interface CadOwnAppearance {
 
 /** Properties whose meaning belongs to the document, not to the current UI. */
 export interface FabricSemanticMetadata {
+  bezierNodeModes?: Record<string, 'cusp' | 'smooth' | 'symmetric'>;
+  dxfCurveData?: {
+    kind: 'arc' | 'polyline';
+    baseMatrix: [number, number, number, number, number, number];
+    pathSignature: string;
+    center?: { x: number; y: number };
+    radius?: number;
+    startAngle?: number;
+    endAngle?: number;
+    points?: { x: number; y: number }[];
+    bulges?: number[];
+    closed?: boolean;
+  };
   cadLayerId?: string;
   cadStyleMode?: 'object' | 'layer';
   cadOwnAppearance?: CadOwnAppearance;
@@ -77,6 +90,8 @@ export type FabricObjectWithMetadata = fabric.FabricObject & FabricSemanticMetad
  * intentionally do not appear here.
  */
 export const FABRIC_CUSTOM_PROPERTIES = [
+  'bezierNodeModes',
+  'dxfCurveData',
   'cadLayerId',
   'cadStyleMode',
   'cadOwnAppearance',
@@ -105,6 +120,8 @@ fabric.FabricObject.customProperties = [
 export function getFabricMetadata(object: fabric.FabricObject): FabricSemanticMetadata {
   const metadata = object as FabricObjectWithMetadata;
   return {
+    bezierNodeModes: metadata.bezierNodeModes,
+    dxfCurveData: metadata.dxfCurveData,
     cadLayerId: metadata.cadLayerId,
     cadStyleMode: metadata.cadStyleMode,
     cadOwnAppearance: metadata.cadOwnAppearance,

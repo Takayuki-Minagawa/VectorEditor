@@ -56,6 +56,8 @@ export function useAutoSave(paused = false) {
         orthoMode: state.orthoMode,
         cadLayers: state.cadLayers,
         activeCadLayerId: state.activeCadLayerId,
+        pages: state.pages,
+        activePageId: state.activePageId,
       });
       const snapshot = JSON.stringify(payload);
       if (snapshot === lastSavedSnapshot.current) return;

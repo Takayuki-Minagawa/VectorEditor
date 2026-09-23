@@ -43,6 +43,26 @@ describe('DXF import and re-export', () => {
     expect(text.at.x).toBeCloseTo(-15 * scale, 5); expect(text.at.y).toBeCloseTo(50 * scale, 5); expect(text.angle).toBeCloseTo(35, 5); expect(text.height).toBeCloseTo(12 * scale, 5);
     objects.forEach((object) => object.dispose());
   });
+  it('round-trips ARC and signed bulges after rotation, mirroring and scale', () => {
+    const curved: DxfDrawing = { ...drawing, entities: [
+      { type: 'ARC', layerId: '0', center: { x: 30, y: 20 }, radius: 10, startAngle: 300, endAngle: 60 },
+      { type: 'POLYLINE', layerId: '0', points: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }], bulges: [1, -.5, .25], closed: true },
+    ] };
+    const objects = dxfToFabricObjects(curved, 'cm', 1000);
+    const original = parseDxf(exportObjectsToDxf(objects, 1000, 1000).text);
+    expect(original.entities[0]).toMatchObject({ type: 'ARC', radius: 100, center: { x: 300, y: 200 } });
+    expect(original.entities[1]).toMatchObject({ type: 'POLYLINE', bulges: [1, -.5, .25], closed: true });
+    objects[0].rotate(45);
+    objects[1].set({ flipX: true, scaleX: 2, scaleY: 2 });
+    const changed = parseDxf(exportObjectsToDxf(objects, 1000, 1000).text);
+    expect(changed.entities[0].type).toBe('ARC');
+    expect(changed.entities[1]).toMatchObject({ type: 'POLYLINE', bulges: [-1, .5, -.25] });
+    objects[0].set({ scaleX: 2, scaleY: 1 });
+    const approximate = exportObjectsToDxf(objects, 1000, 1000);
+    expect(approximate.approximatedTypes).toContain('DxfCurve');
+    expect(approximate.text).toContain('POLYLINE');
+    objects.forEach((object) => object.dispose());
+  });
   it('rejects coordinates that overflow the converted mm range', () => {
     expect(() => dxfToFabricObjects({ ...drawing, entities: [{ type: 'CIRCLE', layerId: '0', center: { x: 1e9, y: 0 }, radius: 1 }] }, 'm', 100)).toThrow(/coordinate/);
   });

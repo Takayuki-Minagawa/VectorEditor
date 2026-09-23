@@ -13,6 +13,7 @@ export type ToolType =
   | 'diamond'
   | 'polygon'
   | 'polyline'
+  | 'bezier'
   | 'text'
   | 'pencil'
   | 'calibrate'
@@ -147,7 +148,16 @@ export interface SerializedCanvasData extends Record<string, unknown> {
   objects: unknown[];
 }
 
+export interface DocumentPage {
+  id: string;
+  name: string;
+  canvas: { width: number; height: number; backgroundColor: string };
+  objects: SerializedCanvasData;
+}
+
 export interface DocumentData {
+  pages?: DocumentPage[];
+  activePageId?: string;
   cadLayers?: CadLayer[];
   activeCadLayerId?: string;
   documentId: string;
