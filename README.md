@@ -162,6 +162,8 @@ CAD PDF files are generated in millimetres with the requested physical paper siz
 - Node.js 20 or later (the CI environment uses Node.js 20)
 - npm
 
+KaTeX is pinned to `0.18.2` for its trust-restriction security fix and compatibility with the Node.js 20 CI toolchain. Check the Node.js requirement of its CLI dependency before upgrading it.
+
 ### Install and run
 
 ```bash
@@ -198,7 +200,7 @@ CI runs lint, type checking, unit tests, production dependency auditing, build, 
 | Zustand | 5.0 | Editor, UI, and i18n state |
 | jsPDF | 4.2 | PDF generation |
 | svg2pdf.js | 2.7 | SVG-to-PDF rendering |
-| KaTeX | 0.16 | LaTeX rendering |
+| KaTeX | 0.18.2 | LaTeX rendering |
 | html2canvas | 1.4 | LaTeX bitmap capture |
 | Vite | 7.3 | Development and production build |
 | Vitest / Testing Library | 4.1 / 16.3 | Unit and component tests |
