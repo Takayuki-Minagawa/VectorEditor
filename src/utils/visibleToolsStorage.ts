@@ -45,8 +45,12 @@ export function loadVisibleTools(): Set<ToolType> {
 }
 
 export function saveVisibleTools(visibleTools: ReadonlySet<ToolType>): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    visible: [...visibleTools],
-    known: ALL_TOOL_IDS,
-  } satisfies VisibleToolsStorageV4));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      visible: [...visibleTools],
+      known: ALL_TOOL_IDS,
+    } satisfies VisibleToolsStorageV4));
+  } catch {
+    // The selection still applies for this session when storage is denied or full.
+  }
 }

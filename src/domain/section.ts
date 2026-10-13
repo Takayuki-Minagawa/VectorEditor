@@ -9,7 +9,6 @@
 import { pointsCoincide } from './sectionGeometryPredicates';
 
 export const SECTION_PROFILE_VERSION = 1 as const;
-export const SECTION_LENGTH_UNIT = 'mm' as const;
 
 export interface SectionPoint {
   x: number;

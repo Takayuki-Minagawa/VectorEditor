@@ -20,7 +20,7 @@ function loadLanguage(): Lang {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'ja' || saved === 'en') return saved;
   } catch {
-    // Fall back to the browser locale when storage is unavailable.
+    // Fall back to Japanese when storage is unavailable.
   }
   return 'ja';
 }

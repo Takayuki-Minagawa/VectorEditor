@@ -8,6 +8,7 @@ import { createAsyncCanvasMutationGuard } from '../utils/canvasCommands';
 import { calibrateSelection, calibrationFactor } from '../utils/calibration';
 import { measureClosedShape, measurementValue, pointAngle, pointDistance, type DrawingPoint, type ShapeMeasurement } from '../utils/geometryMeasurements';
 import Dialog from './Dialog';
+import { useWindowEvent } from '../hooks/useWindowEvent';
 
 export const MEASURE_SHAPE_EVENT = 'vectoreditor:measure-shape';
 type Result = { kind: 'distance' | 'angle'; value: number; cad: boolean } | { kind: 'shape'; value: ShapeMeasurement; cad: boolean };
@@ -27,16 +28,12 @@ export default function GeometryTools() {
   const [count, setCount] = useState(0);
   const picking = tool === 'calibrate' || tool === 'distanceMeasure' || tool === 'angleMeasure';
 
-  useEffect(() => {
-    const measure = () => {
-      const target = canvas?.getActiveObject();
-      if (!target) return;
-      try { setUnit(cadUnit); setResult({ kind: 'shape', value: measureClosedShape(target), cad: drawingMode === 'cad' }); }
-      catch { useEditorStore.getState().showToast(t('measurementShapeError'), 'error'); }
-    };
-    window.addEventListener(MEASURE_SHAPE_EVENT, measure);
-    return () => window.removeEventListener(MEASURE_SHAPE_EVENT, measure);
-  }, [canvas, drawingMode, cadUnit, t]);
+  useWindowEvent(MEASURE_SHAPE_EVENT, () => {
+    const target = canvas?.getActiveObject();
+    if (!target) return;
+    try { setUnit(cadUnit); setResult({ kind: 'shape', value: measureClosedShape(target), cad: drawingMode === 'cad' }); }
+    catch { useEditorStore.getState().showToast(t('measurementShapeError'), 'error'); }
+  });
 
   useEffect(() => {
     if (!canvas || !picking) return;

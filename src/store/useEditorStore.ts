@@ -17,7 +17,10 @@ import {
   restoreCanvasObjects,
   serializeCanvasSnapshot,
   type CanvasSnapshot,
+  type CanvasStateInput,
+  type RestoreActions,
 } from '../utils/documentSerializer';
+import { useI18n } from '../i18n/useI18n';
 import { historyService } from '../utils/historyService';
 import {
   applyThemeToDom,
@@ -212,12 +215,14 @@ function trimHistory(history: CanvasSnapshot[]): CanvasSnapshot[] {
   return history;
 }
 
-function captureSnapshot(
-  state: EditorStore,
-  reusableObjects?: SerializedCanvasData,
-): CanvasSnapshot | null {
+/**
+ * The subset of editor state that is persisted with a document. Every
+ * serialisation path (history, autosave, JSON save, projects) goes through
+ * this selector so a new setting only has to be added here.
+ */
+export function selectCanvasStateInput(state: EditorStore): CanvasStateInput | null {
   if (!state.canvas) return null;
-  const input = {
+  return {
     canvas: state.canvas,
     canvasWidth: state.canvasWidth,
     canvasHeight: state.canvasHeight,
@@ -240,6 +245,27 @@ function captureSnapshot(
     pages: state.pages,
     activePageId: state.activePageId,
   };
+}
+
+/** The store actions a document restore needs, in the shape restoreDocumentData expects. */
+export function restoreActionsFromStore(state: EditorStore): RestoreActions {
+  return {
+    setCanvasSize: state.setCanvasSize,
+    setBackgroundColor: state.setBackgroundColor,
+    setDrawingMode: state.setDrawingMode,
+    setCadUnit: state.setCadUnit,
+    setScale: state.setScale,
+    setCadSize: state.setCadSize,
+    restoreEditorSettings: state.restoreEditorSettings,
+  };
+}
+
+function captureSnapshot(
+  state: EditorStore,
+  reusableObjects?: SerializedCanvasData,
+): CanvasSnapshot | null {
+  const input = selectCanvasStateInput(state);
+  if (!input) return null;
   const snapshot = reusableObjects
     ? createCanvasSnapshot(input, reusableObjects)
     : serializeCanvasSnapshot(input);
@@ -391,7 +417,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (requestId === historyRequestId) {
         set({ historyIndex: previousIndex });
       }
-      get().showToast('Undo/Redo の復元に失敗しました。', 'error');
+      get().showToast(useI18n.getState().t('historyRestoreFailed'), 'error');
     }
   };
 
@@ -488,7 +514,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     setDrawingMode: (mode) => {
       if (mode === get().drawingMode) return;
       if (mode === 'cad' && get().pages.length > 1) {
-        get().showToast('複数ページの文書はCADモードに切り替えられません。', 'error');
+        get().showToast(useI18n.getState().t('cadModeMultiPageError'), 'error');
         return;
       }
       set({ drawingMode: mode });

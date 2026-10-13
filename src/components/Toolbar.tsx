@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import * as fabric from 'fabric';
-import { captureCurrentEditorSnapshot, useEditorStore } from '../store/useEditorStore';
+import { captureCurrentEditorSnapshot, restoreActionsFromStore, selectCanvasStateInput, useEditorStore } from '../store/useEditorStore';
+import { useWindowEvent } from '../hooks/useWindowEvent';
 import { useUiStore } from '../store/useUiStore';
 import { useI18n } from '../i18n/useI18n';
 import { importDrawingFile } from '../services/importService';
@@ -40,9 +41,6 @@ export default function Toolbar() {
   const historyIndex = useEditorStore((s) => s.historyIndex);
   const historyLength = useEditorStore((s) => s.history.length);
   const isRestoring = useEditorStore((s) => s.isRestoring);
-  const canvasWidth = useEditorStore((s) => s.canvasWidth);
-  const canvasHeight = useEditorStore((s) => s.canvasHeight);
-  const backgroundColor = useEditorStore((s) => s.backgroundColor);
   const pushHistory = useEditorStore((s) => s.pushHistory);
   const gridVisible = useEditorStore((s) => s.gridVisible);
   const toggleGrid = useEditorStore((s) => s.toggleGrid);
@@ -50,44 +48,13 @@ export default function Toolbar() {
   const t = useI18n((s) => s.t);
 
   const drawingMode = useEditorStore((s) => s.drawingMode);
-  const cadUnit = useEditorStore((s) => s.cadUnit);
-  const scale = useEditorStore((s) => s.scale);
 
-  const cadWidth = useEditorStore((s) => s.cadWidth);
-  const cadHeight = useEditorStore((s) => s.cadHeight);
-
-  useEffect(() => {
-    const openSectionDialog = () => setShowSectionOperations(true);
-    window.addEventListener(OPEN_SECTION_OPERATIONS_EVENT, openSectionDialog);
-    return () => window.removeEventListener(OPEN_SECTION_OPERATIONS_EVENT, openSectionDialog);
-  }, []);
+  useWindowEvent(OPEN_SECTION_OPERATIONS_EVENT, () => setShowSectionOperations(true));
 
   const handleSaveJSON = () => {
-    if (!canvas) return;
-    const state = useEditorStore.getState();
-    const data = createDocumentData({
-      canvas,
-      canvasWidth,
-      canvasHeight,
-      backgroundColor,
-      drawingMode,
-      cadUnit,
-      scale,
-      cadWidth,
-      cadHeight,
-      gridVisible: state.gridVisible,
-      gridSize: state.gridSize,
-      snapToGrid: state.snapToGrid,
-      snapToObjects: state.snapToObjects,
-      showRulers: state.showRulers,
-      guides: state.guides,
-      snapToGuides: state.snapToGuides,
-      orthoMode: state.orthoMode,
-      cadLayers: state.cadLayers,
-      activeCadLayerId: state.activeCadLayerId,
-      pages: state.pages,
-      activePageId: state.activePageId,
-    });
+    const input = selectCanvasStateInput(useEditorStore.getState());
+    if (!input) return;
+    const data = createDocumentData(input);
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -114,27 +81,10 @@ export default function Toolbar() {
       const data = parseDocumentData(await file.text());
       if (!canStartRestore()) return;
       const rollbackSnapshot = captureCurrentEditorSnapshot() ?? undefined;
-      const {
-        setCanvasSize,
-        setBackgroundColor,
-        setDrawingMode,
-        setCadUnit,
-        setScale,
-        setCadSize,
-        restoreEditorSettings,
-      } = useEditorStore.getState();
       // No await belongs between the ownership check / rollback capture and
       // this call: restoreDocumentData claims the HistoryService generation
       // synchronously before its first suspension point.
-      await restoreDocumentData(canvas, data, {
-        setCanvasSize,
-        setBackgroundColor,
-        setDrawingMode,
-        setCadUnit,
-        setScale,
-        setCadSize,
-        restoreEditorSettings,
-      }, {
+      await restoreDocumentData(canvas, data, restoreActionsFromStore(useEditorStore.getState()), {
         rollbackSnapshot,
       });
       useUiStore.getState().setCurrentProjectId(null);

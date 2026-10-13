@@ -202,10 +202,3 @@ export function simplifyContour(
   const points = simplifyPolyline(contour.points, tolerance, true);
   return { ...contour, points, area: polygonArea(points) };
 }
-
-export function simplifyContours(
-  contours: readonly Contour[],
-  tolerance: number,
-): Contour[] {
-  return contours.map((contour) => simplifyContour(contour, tolerance));
-}

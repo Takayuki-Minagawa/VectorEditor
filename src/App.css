@@ -48,6 +48,15 @@
   color: #eee;
 }
 
+.restore-remember {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 /* ===== App Header ===== */
 .app-header {
   display: flex;

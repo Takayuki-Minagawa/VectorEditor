@@ -108,10 +108,6 @@ function removeLegacyLocalStorage(): void {
   }
 }
 
-export function loadLegacyAutoSaveRaw(): string | null {
-  return readLegacyLocalStorage();
-}
-
 /**
  * Read every storage location independently.  During an IndexedDB migration
  * both stores can legitimately contain data (for example, if a previous
@@ -130,11 +126,6 @@ export async function loadAutoSaveCandidates(): Promise<StoredAutoSave[]> {
   const legacy = readLegacyLocalStorage();
   if (legacy) candidates.push({ raw: legacy, source: 'localstorage' });
   return candidates;
-}
-
-/** Compatibility helper for callers that only need the preferred store. */
-export async function loadAutoSaveRaw(): Promise<StoredAutoSave | null> {
-  return (await loadAutoSaveCandidates())[0] ?? null;
 }
 
 /** IndexedDB first, with localStorage retained as a compatibility fallback. */

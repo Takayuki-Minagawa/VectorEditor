@@ -4,7 +4,7 @@ import { loadAutoSaveAsync } from '../hooks/useAutoSave';
 import {
   LEGACY_AUTOSAVE_STORAGE_KEY,
   clearAutoSaveRaw,
-  loadAutoSaveRaw,
+  loadAutoSaveCandidates,
   saveAutoSaveRaw,
 } from './autoSaveStorage';
 
@@ -22,10 +22,10 @@ describe('autosave storage fallback', () => {
     await saveAutoSaveRaw('{"version":2}');
 
     expect(localStorage.getItem(LEGACY_AUTOSAVE_STORAGE_KEY)).toBe('{"version":2}');
-    await expect(loadAutoSaveRaw()).resolves.toEqual({
+    await expect(loadAutoSaveCandidates()).resolves.toEqual([{
       raw: '{"version":2}',
       source: 'localstorage',
-    });
+    }]);
   });
 
   it('surfaces quota failures when no browser store accepts the snapshot', async () => {
@@ -76,7 +76,7 @@ describe('autosave candidate selection', () => {
     expect(loaded?.savedAt).toBe('2026-07-15T02:00:00.000Z');
     expect(loaded?.canvas.width).toBe(900);
     expect(localStorage.getItem(LEGACY_AUTOSAVE_STORAGE_KEY)).toBeNull();
-    const migrated = await loadAutoSaveRaw();
+    const [migrated] = await loadAutoSaveCandidates();
     expect(migrated?.source).toBe('indexeddb');
     expect(JSON.parse(migrated?.raw ?? '{}')).toMatchObject({
       savedAt: '2026-07-15T02:00:00.000Z',

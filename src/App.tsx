@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 import Canvas from './components/Canvas';
 import Toolbar from './components/Toolbar';
@@ -24,14 +24,24 @@ import { OPEN_IMAGE_CROP_EVENT } from './utils/imageCropUiEvents';
 import type * as fabric from 'fabric';
 import { useExternalClipboard } from './hooks/useExternalClipboard';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useWindowEvent } from './hooks/useWindowEvent';
 import { clearAutoSave, loadAutoSaveAsync, useAutoSave, type AutoSaveData } from './hooks/useAutoSave';
-import { captureCurrentEditorSnapshot, useEditorStore } from './store/useEditorStore';
+import {
+  captureCurrentEditorSnapshot,
+  restoreActionsFromStore,
+  useEditorStore,
+} from './store/useEditorStore';
 import { useUiStore } from './store/useUiStore';
 import { useI18n } from './i18n/useI18n';
 import {
   isDocumentRestoreSupersededError,
   restoreDocumentData,
 } from './utils/documentSerializer';
+import {
+  resolveStartupRestorePolicy,
+  saveStartupRestorePreference,
+  type StartupRestorePolicy,
+} from './utils/startupRestorePolicy';
 import {
   OPEN_TRACE_DIALOG_EVENT,
   type OpenTraceDialogDetail,
@@ -52,29 +62,28 @@ function App() {
   const setLang = useI18n((s) => s.setLang);
   const t = useI18n((s) => s.t);
 
-  // Auto-save restore prompt: read the saved snapshot once at startup and
-  // hold it until the user decides whether to restore.
+  // Startup restore: the saved snapshot is read once. Depending on the
+  // resolved policy it is restored silently (`auto`, the default), offered in
+  // a dialog (`ask`) or dropped (`discard`). Automated clients can pass
+  // `?restore=` to pick the behaviour for a single launch.
+  const [startupPolicy] = useState<StartupRestorePolicy>(() => resolveStartupRestorePolicy());
   const [pendingRestore, setPendingRestore] = useState<AutoSaveData | null>(null);
   const [checkingAutoSave, setCheckingAutoSave] = useState(true);
-  // True from the moment the user confirms a restore until loadFromJSON()
-  // settles, so async restores (large/image-heavy data) aren't overwritten.
+  // True from the moment a restore starts until loadFromJSON() settles, so
+  // async restores (large/image-heavy data) aren't overwritten.
   const [restoring, setRestoring] = useState(false);
+  // Set once the automatic restore has been attempted; a failed attempt falls
+  // back to the dialog so the only recovery copy can be retried or discarded.
+  const autoRestoreAttempted = useRef(false);
+  const [autoRestoreFailed, setAutoRestoreFailed] = useState(false);
+  const [rememberAutoRestore, setRememberAutoRestore] = useState(false);
   const [traceRequest, setTraceRequest] = useState<OpenTraceDialogDetail | null>(null);
   const [cropImage, setCropImage] = useState<fabric.Image | null>(null);
 
-  useEffect(() => {
-    const openCrop = (event: Event) => setCropImage((event as CustomEvent<fabric.Image>).detail);
-    window.addEventListener(OPEN_IMAGE_CROP_EVENT, openCrop);
-    return () => window.removeEventListener(OPEN_IMAGE_CROP_EVENT, openCrop);
-  }, []);
-
-  useEffect(() => {
-    const openTrace = (event: Event) => {
-      setTraceRequest((event as CustomEvent<OpenTraceDialogDetail>).detail ?? {});
-    };
-    window.addEventListener(OPEN_TRACE_DIALOG_EVENT, openTrace);
-    return () => window.removeEventListener(OPEN_TRACE_DIALOG_EVENT, openTrace);
-  }, []);
+  useWindowEvent<CustomEvent<fabric.Image>>(OPEN_IMAGE_CROP_EVENT, (event) => setCropImage(event.detail));
+  useWindowEvent<CustomEvent<OpenTraceDialogDetail>>(OPEN_TRACE_DIALOG_EVENT, (event) => {
+    setTraceRequest(event.detail ?? {});
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +94,16 @@ function App() {
         if (cancelled) return;
         // The project id is only safe to retain across startup when an
         // autosave is available to reconstruct that working document.
-        if (!saved) useUiStore.getState().setCurrentProjectId(null);
+        if (!saved) {
+          useUiStore.getState().setCurrentProjectId(null);
+          return;
+        }
+        if (startupPolicy === 'discard') {
+          void clearAutoSave();
+          useUiStore.getState().setCurrentProjectId(null);
+          useEditorStore.getState().showToast(useI18n.getState().t('restoreDiscarded'), 'info');
+          return;
+        }
         setPendingRestore(saved);
       })
       .catch(() => {
@@ -93,7 +111,7 @@ function App() {
       })
       .finally(() => { if (!cancelled) setCheckingAutoSave(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [startupPolicy]);
 
   useKeyboardShortcuts();
   useExternalClipboard();
@@ -104,22 +122,15 @@ function App() {
 
   const applyRestore = (saved: AutoSaveData) => {
     if (!canvas) return;
-    const { setCanvasSize, setBackgroundColor, setDrawingMode, setCadUnit, setScale, setCadSize, restoreEditorSettings, showToast } = useEditorStore.getState();
+    const state = useEditorStore.getState();
 
     setRestoring(true);
     setPendingRestore(null);
-    restoreDocumentData(canvas, saved, {
-      setCanvasSize,
-      setBackgroundColor,
-      setDrawingMode,
-      setCadUnit,
-      setScale,
-      setCadSize,
-      restoreEditorSettings,
-    }, {
+    restoreDocumentData(canvas, saved, restoreActionsFromStore(state), {
       rollbackSnapshot: captureCurrentEditorSnapshot() ?? undefined,
     }).then(() => {
-      showToast(t('restoreDone'), 'success');
+      setAutoRestoreFailed(false);
+      state.showToast(t('restoreDone'), 'success');
     }).catch((error: unknown) => {
       // A newer manual/project restore now owns the canvas. Do not revive the
       // stale autosave prompt over that newer document.
@@ -127,16 +138,32 @@ function App() {
       // Preserve the only recovery copy for retry or explicit discard. The
       // live document has already been rolled back by restoreDocumentData.
       setPendingRestore(saved);
-      showToast(t('loadError'), 'error');
+      if (startupPolicy === 'auto') setAutoRestoreFailed(true);
+      state.showToast(t('loadError'), 'error');
     }).finally(() => {
       setRestoring(false);
     });
+  };
+
+  // Silent restore once the canvas exists. Runs at most once per launch.
+  useEffect(() => {
+    if (startupPolicy !== 'auto' || !canvas || !pendingRestore || autoRestoreAttempted.current) return;
+    autoRestoreAttempted.current = true;
+    applyRestore(pendingRestore);
+    // applyRestore is recreated every render; the guard above bounds the effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startupPolicy, canvas, pendingRestore]);
+
+  const confirmRestore = (saved: AutoSaveData) => {
+    if (rememberAutoRestore) saveStartupRestorePreference('auto');
+    applyRestore(saved);
   };
 
   const discardRestore = () => {
     void clearAutoSave();
     setCurrentProjectId(null);
     setPendingRestore(null);
+    setAutoRestoreFailed(false);
   };
 
   const formatSavedAt = (iso?: string) => {
@@ -147,6 +174,11 @@ function App() {
       return '';
     }
   };
+
+  // The dialog is shown only when the user asked to be prompted, or when the
+  // silent restore failed and the user must decide what to do with the copy.
+  const showRestoreDialog = pendingRestore !== null
+    && (startupPolicy === 'ask' || autoRestoreFailed);
 
   return (
     <div className="app" aria-busy={isRestoring}>
@@ -234,18 +266,30 @@ function App() {
         )}
         {cropImage && <ImageCropDialog image={cropImage} onClose={() => setCropImage(null)} />}
 
-      {pendingRestore && (
+      {showRestoreDialog && pendingRestore && (
         <Dialog title={t('restoreTitle')} onClose={discardRestore} dismissible={false} maxWidth={380}>
             <div className="modal-body">
-              <p style={{ fontSize: 13, marginBottom: 6 }}>{t('restoreMessage')}</p>
+              <p style={{ fontSize: 13, marginBottom: 6 }}>
+                {autoRestoreFailed ? t('restoreRetryMessage') : t('restoreMessage')}
+              </p>
               {pendingRestore.savedAt && (
                 <p style={{ fontSize: 12, color: '#888' }}>
                   {t('restoreSavedAt')}: {formatSavedAt(pendingRestore.savedAt)}
                 </p>
               )}
+              {!autoRestoreFailed && (
+                <label className="restore-remember">
+                  <input
+                    type="checkbox"
+                    checked={rememberAutoRestore}
+                    onChange={(event) => setRememberAutoRestore(event.target.checked)}
+                  />
+                  <span>{t('restoreAutoNextTime')}</span>
+                </label>
+              )}
             </div>
             <div className="nm-actions">
-              <button className="toolbar-btn nm-btn" onClick={() => applyRestore(pendingRestore)}>
+              <button className="toolbar-btn nm-btn" onClick={() => confirmRestore(pendingRestore)}>
                 {t('restoreConfirm')}
               </button>
               <button className="toolbar-btn nm-btn nm-cancel" onClick={discardRestore}>

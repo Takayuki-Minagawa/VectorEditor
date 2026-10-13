@@ -24,6 +24,7 @@ import {
 } from '../utils/shapeBoolean';
 import { openSectionOperations } from '../utils/sectionUiEvents';
 import { openTraceDialog } from '../utils/traceUiEvents';
+import { saveStartupRestorePreference, type StartupRestorePolicy } from '../utils/startupRestorePolicy';
 import Dialog from './Dialog';
 import { MEASURE_SHAPE_EVENT } from './GeometryTools';
 
@@ -98,6 +99,10 @@ export default function CommandPalette() {
     && isSupportedSectionSourceObject(canvas.getActiveObject()!);
 
   const actions = useMemo<EditorAction[]>(() => {
+    const setStartupRestore = (policy: StartupRestorePolicy) => {
+      saveStartupRestorePreference(policy);
+      showToast(t('startupRestoreSaved'), 'success');
+    };
     const runSectionCommand = (operation: () => void) => {
       try {
         operation();
@@ -123,6 +128,9 @@ export default function CommandPalette() {
       { id: 'toggle-rulers', label: t('rulers'), keywords: 'ruler guide', perform: toggleRulers },
       { id: 'toggle-ortho', label: t('ortho'), keywords: 'orthogonal angle', perform: toggleOrtho },
       { id: 'toggle-theme', label: t('tip_theme'), keywords: 'theme dark light', perform: toggleTheme },
+      { id: 'startup-restore-auto', label: t('startupRestoreAuto'), keywords: 'startup restore autosave auto 起動 復元 自動保存', perform: () => setStartupRestore('auto') },
+      { id: 'startup-restore-ask', label: t('startupRestoreAsk'), keywords: 'startup restore autosave ask confirm 起動 復元 確認', perform: () => setStartupRestore('ask') },
+      { id: 'startup-restore-discard', label: t('startupRestoreDiscard'), keywords: 'startup restore autosave discard new 起動 復元 破棄 新規', perform: () => setStartupRestore('discard') },
       {
         id: 'trace-image',
         label: t('traceVectorize'),

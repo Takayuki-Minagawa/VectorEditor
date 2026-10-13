@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { captureCurrentEditorSnapshot, useEditorStore } from '../store/useEditorStore';
+import { captureCurrentEditorSnapshot, restoreActionsFromStore, selectCanvasStateInput, useEditorStore } from '../store/useEditorStore';
 import { useUiStore } from '../store/useUiStore';
 import { useI18n } from '../i18n/useI18n';
 import {
@@ -60,34 +60,12 @@ export default function ProjectManager() {
   }, [open, currentId, t]);
 
   const captureDocument = (documentId: string): DocumentData | null => {
-    const state = useEditorStore.getState();
-    if (!state.canvas) return null;
+    const input = selectCanvasStateInput(useEditorStore.getState());
+    if (!input) return null;
     return {
       documentId,
       version: DOCUMENT_VERSION,
-      ...serializeCanvasSnapshot({
-        canvas: state.canvas,
-        canvasWidth: state.canvasWidth,
-        canvasHeight: state.canvasHeight,
-        backgroundColor: state.backgroundColor,
-        drawingMode: state.drawingMode,
-        cadUnit: state.cadUnit,
-        scale: state.scale,
-        cadWidth: state.cadWidth,
-        cadHeight: state.cadHeight,
-        gridVisible: state.gridVisible,
-        gridSize: state.gridSize,
-        snapToGrid: state.snapToGrid,
-        snapToObjects: state.snapToObjects,
-        showRulers: state.showRulers,
-        guides: state.guides,
-        snapToGuides: state.snapToGuides,
-        orthoMode: state.orthoMode,
-        cadLayers: state.cadLayers,
-        activeCadLayerId: state.activeCadLayerId,
-        pages: state.pages,
-        activePageId: state.activePageId,
-      }),
+      ...serializeCanvasSnapshot(input),
     };
   };
 
@@ -136,17 +114,8 @@ export default function ProjectManager() {
   const restore = async (data: DocumentData, project: ProjectDocument) => {
     if (!canvas || busy) return;
     setBusy(true);
-    const state = useEditorStore.getState();
     try {
-      await restoreDocumentData(canvas, data, {
-        setCanvasSize: state.setCanvasSize,
-        setBackgroundColor: state.setBackgroundColor,
-        setDrawingMode: state.setDrawingMode,
-        setCadUnit: state.setCadUnit,
-        setScale: state.setScale,
-        setCadSize: state.setCadSize,
-        restoreEditorSettings: state.restoreEditorSettings,
-      }, {
+      await restoreDocumentData(canvas, data, restoreActionsFromStore(useEditorStore.getState()), {
         rollbackSnapshot: captureCurrentEditorSnapshot() ?? undefined,
       });
       setCurrentId(project.id);

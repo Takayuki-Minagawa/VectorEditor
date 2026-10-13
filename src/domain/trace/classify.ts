@@ -1,4 +1,3 @@
-import type { Contour } from './contour';
 import {
   DEFAULT_TRACED_PRIMITIVE_STROKE_WIDTH,
   type TracedPoint,
@@ -473,11 +472,4 @@ export function classifyShape(
   }
 
   return { kind: 'polygon', points, closed: true };
-}
-
-export function classifyContour(
-  contour: Contour,
-  options: Omit<ClassificationOptions, 'closed'> = {},
-): TracedShape {
-  return classifyShape(contour.points, { ...options, closed: true });
 }

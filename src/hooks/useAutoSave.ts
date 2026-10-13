@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { useEditorStore } from '../store/useEditorStore';
+import { selectCanvasStateInput, useEditorStore } from '../store/useEditorStore';
+import { useI18n } from '../i18n/useI18n';
 import {
   DOCUMENT_VERSION,
   parseAutoSaveData,
@@ -9,7 +10,6 @@ import type { AutoSaveData } from '../utils/documentSerializer';
 import {
   clearAutoSaveRaw,
   loadAutoSaveCandidates,
-  loadLegacyAutoSaveRaw,
   migrateLegacyAutoSave,
   saveAutoSaveRaw,
 } from '../utils/autoSaveStorage';
@@ -33,32 +33,11 @@ export function useAutoSave(paused = false) {
     const save = async (): Promise<void> => {
       if (pausedRef.current || saveInFlight.current) return;
       const state = useEditorStore.getState();
-      const { canvas } = state;
-      if (!canvas || state.isRestoring) return;
+      if (state.isRestoring) return;
+      const input = selectCanvasStateInput(state);
+      if (!input) return;
 
-      const payload = serializeCanvasSnapshot({
-        canvas,
-        canvasWidth: state.canvasWidth,
-        canvasHeight: state.canvasHeight,
-        backgroundColor: state.backgroundColor,
-        drawingMode: state.drawingMode,
-        cadUnit: state.cadUnit,
-        scale: state.scale,
-        cadWidth: state.cadWidth,
-        cadHeight: state.cadHeight,
-        gridVisible: state.gridVisible,
-        gridSize: state.gridSize,
-        snapToGrid: state.snapToGrid,
-        snapToObjects: state.snapToObjects,
-        showRulers: state.showRulers,
-        guides: state.guides,
-        snapToGuides: state.snapToGuides,
-        orthoMode: state.orthoMode,
-        cadLayers: state.cadLayers,
-        activeCadLayerId: state.activeCadLayerId,
-        pages: state.pages,
-        activePageId: state.activePageId,
-      });
+      const payload = serializeCanvasSnapshot(input);
       const snapshot = JSON.stringify(payload);
       if (snapshot === lastSavedSnapshot.current) return;
 
@@ -78,10 +57,7 @@ export function useAutoSave(paused = false) {
         // interval until the document changes or a later save succeeds.
         if (lastFailedSnapshot.current !== snapshot) {
           lastFailedSnapshot.current = snapshot;
-          useEditorStore.getState().showToast(
-            '自動保存に失敗しました。ブラウザの保存容量を確認してください。',
-            'error',
-          );
+          useEditorStore.getState().showToast(useI18n.getState().t('autoSaveFailed'), 'error');
         }
       } finally {
         saveInFlight.current = false;
@@ -94,19 +70,6 @@ export function useAutoSave(paused = false) {
 
     return () => window.clearInterval(interval);
   }, []);
-}
-
-/**
- * Synchronous compatibility API for the old localStorage-backed startup.
- * New callers should use loadAutoSaveAsync so IndexedDB snapshots are found.
- */
-export function loadAutoSave(): AutoSaveData | null {
-  try {
-    const raw = loadLegacyAutoSaveRaw();
-    return raw ? parseAutoSaveData(raw) : null;
-  } catch {
-    return null;
-  }
 }
 
 export async function loadAutoSaveAsync(): Promise<AutoSaveData | null> {

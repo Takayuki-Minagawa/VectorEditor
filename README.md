@@ -110,7 +110,8 @@ These are geometric section properties only. Material strength, member resistanc
 - v1–v3 documents migrate to schema v4 with a default CAD layer and one illustration page
 - Temporary interaction flags such as `selectable` and `evented` are not persisted; stable IDs, object kinds, lock state, and semantic references are persisted
 - Auto-save runs every 10 seconds, preferring IndexedDB and falling back to localStorage when required; valid legacy localStorage saves are migrated automatically
-- Startup restoration requires confirmation, and storage failures are reported with a toast
+- Startup restoration is automatic by default (a toast confirms it), so the editor is usable immediately, including for browser-automation and AI-agent clients. The command palette offers `Startup restore: ask every time` / `restore automatically` / `discard and start new`; the choice is stored in the browser. Append `?restore=auto`, `?restore=ask` or `?restore=discard` (alias `new`) to the URL to override it for a single launch. If an automatic restore fails, the confirmation dialog appears so the snapshot can be retried or discarded.
+- Storage failures are reported with a toast
 - Undo / Redo records the complete document state, including objects, canvas/CAD settings, grids, snapping, rulers, guides, scale, and Ortho mode
 - History restoration is serialized to avoid overlapping Fabric loads; history is capped at 50 snapshots or approximately 32 MiB
 - Import editable SVG or raster PNG, JPEG, GIF, and WebP content with asynchronous error reporting
