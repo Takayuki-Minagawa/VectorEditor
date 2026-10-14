@@ -55,6 +55,10 @@ export function createShapeOnDrag(
   const common = {
     left,
     top,
+    // Drag bounds describe the top-left corner, while Fabric 7 defaults to
+    // positioning objects by their center.
+    originX: 'left' as const,
+    originY: 'top' as const,
     fill: style.fill,
     stroke: style.stroke,
     strokeWidth: style.strokeWidth,
@@ -77,8 +81,8 @@ export function createShapeOnDrag(
       obj = new fabric.Circle({
         ...common,
         radius,
-        left: startX < endX ? startX : startX - radius * 2,
-        top: startY < endY ? startY : startY - radius * 2,
+        left: startX <= endX ? startX : startX - radius * 2,
+        top: startY <= endY ? startY : startY - radius * 2,
       });
       break;
     }
@@ -144,15 +148,9 @@ export function createShapeOnDrag(
     }
     case 'wall':
       obj = new fabric.Rect({
-        left,
-        top,
+        ...common,
         width: Math.max(width, 4),
         height: Math.max(height, 4),
-        fill: style.fill,
-        stroke: style.stroke,
-        strokeWidth: style.strokeWidth,
-        strokeDashArray: style.strokeDashArray ? [...style.strokeDashArray] : undefined,
-        opacity: style.opacity,
       });
       break;
     case 'dimension': {

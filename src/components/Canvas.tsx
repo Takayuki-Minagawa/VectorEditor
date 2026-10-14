@@ -679,8 +679,10 @@ export default function Canvas() {
         const sz = gridSize > 0 ? gridSize : 20;
         const id = generateObjectId('column');
         const col = new fabric.Rect({
-          left: pointer.x - sz / 2,
-          top: pointer.y - sz / 2,
+          left: pointer.x,
+          top: pointer.y,
+          originX: 'center',
+          originY: 'center',
           width: sz,
           height: sz,
           fill: '#333333',
@@ -719,6 +721,8 @@ export default function Canvas() {
         const textbox = new fabric.Textbox(t('defaultText'), {
           left: pointer.x,
           top: pointer.y,
+          originX: 'left',
+          originY: 'top',
           width: 200,
           fontSize: editorStyle.fontSize,
           fontFamily: editorStyle.fontFamily,
@@ -807,6 +811,8 @@ export default function Canvas() {
         setPreview(new fabric.Rect({
           left,
           top,
+          originX: 'left',
+          originY: 'top',
           width,
           height,
           fill: session.kind === 'measuring'

@@ -129,6 +129,9 @@ export default function PropertyPanel() {
       const currentHeight = obj.getScaledHeight() || 1;
       obj.set({ scaleY: (obj.scaleY || 1) * (value as number) / currentHeight });
     }
+    else if (key === 'angle') {
+      obj.rotate(value as number);
+    }
     else if (key === 'strokeDashArray') {
       const str = value as string;
       const dash = str.split(',').map((part) => Number(part.trim()));
